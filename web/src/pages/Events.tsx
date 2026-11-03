@@ -1,7 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+// src/pages/Events.tsx
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import MonthNav from "../components/MonthNav";
 import { PROFILE_AUDIENCES } from "../constants/audiences";
-import { formatDate, fromDateInput, toDateInput } from "../lib/dates";
+import { formatDate, fromDateInput, overlapsMonth, startOfMonth, toDateInput } from "../lib/dates";
 import { groupCareers } from "../lib/careers";
+import { normalizeText } from "../lib/text";
 import { createEvent, deleteEvent, listEvents, updateEvent } from "../services/eventsService";
 import { listCareers } from "../services/careersService";
 import type { Career, RadioEvent } from "../types";
@@ -26,16 +29,34 @@ export default function Events() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
+    const [month, setMonth] = useState(() => startOfMonth(new Date()));
+    const [search, setSearch] = useState("");
+    const [showAll, setShowAll] = useState(false);
 
     useEffect(() => {
         listEvents().then(setEvents);
-        listCareers().then((all) => setCareers(all.filter((c) => c.active)));
+        listCareers().then(setCareers);
     }, []);
 
     const audienceLabel = (id: string) =>
         PROFILE_AUDIENCES.find((o) => o.id === id)?.label ??
         careers.find((c) => c.id === id)?.name ??
         id;
+
+    // Disabled careers stay visible only when the event already uses them.
+    const selectableCareers = careers.filter((c) => c.active || form.audience.includes(c.id));
+
+    const filteredEvents = useMemo(() => {
+        const term = normalizeText(search.trim());
+        const list = events.filter((ev) => {
+            const inRange = showAll || overlapsMonth(ev.date, ev.endDate, month);
+            const matches = term === "" || normalizeText(`${ev.title} ${ev.description}`).includes(term);
+            return inRange && matches;
+        });
+        return list.sort((a, b) =>
+            showAll ? b.date.getTime() - a.date.getTime() : a.date.getTime() - b.date.getTime(),
+        );
+    }, [events, month, search, showAll]);
 
     const setField = <K extends keyof EventForm>(key: K, value: EventForm[K]) =>
         setForm((prev) => ({ ...prev, [key]: value }));
@@ -92,6 +113,8 @@ export default function Events() {
             } else {
                 await createEvent(input);
             }
+            // Jump to the month of the saved event so it is visible in the list.
+            if (!showAll) setMonth(startOfMonth(input.date));
             resetForm();
             setEvents(await listEvents());
         } catch {
@@ -144,7 +167,7 @@ export default function Events() {
                     <legend>Carreras específicas (opcional)</legend>
                     {careers.length === 0 && <p>Aún no hay carreras. Cárgalas en la sección Carreras.</p>}
                     <div className="scroll-box">
-                        {groupCareers(careers).map((group) => (
+                        {groupCareers(selectableCareers).map((group) => (
                             <div key={group.title}>
                                 <strong>{group.title}</strong>
                                 {group.careers.map((c) => (
@@ -154,7 +177,7 @@ export default function Events() {
                                             checked={form.audience.includes(c.id)}
                                             onChange={() => toggleAudience(c.id)}
                                         />
-                                        {c.name}
+                                        {c.name}{!c.active && " (inhabilitada)"}
                                     </label>
                                 ))}
                             </div>
@@ -177,16 +200,40 @@ export default function Events() {
                         {saving ? "Guardando…" : editingId ? "Guardar cambios" : "Publicar evento"}
                     </button>
                     {editingId && (
-                        <button type="button" className="secondary" onClick={resetForm}>
-                            Cancelar edición
-                        </button>
+                        <button type="button" className="secondary" onClick={resetForm}>Cancelar edición</button>
                     )}
                 </div>
             </form>
 
-            <h2>Eventos publicados</h2>
-            {events.length === 0 && <p>Aún no hay eventos.</p>}
-            {events.map((ev) => (
+            <div className="section-head">
+                <h2>Eventos publicados</h2>
+                <span className="muted">
+          {filteredEvents.length} {filteredEvents.length === 1 ? "evento" : "eventos"}
+        </span>
+            </div>
+
+            <div className="toolbar">
+                {!showAll && <MonthNav month={month} onChange={setMonth} />}
+                <input
+                    className="search"
+                    type="search"
+                    placeholder="Buscar por título o descripción"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                />
+                <label className="check">
+                    <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+                    Ver todos los meses
+                </label>
+            </div>
+
+            {filteredEvents.length === 0 && (
+                <p className="empty">
+                    {events.length === 0 ? "Aún no hay eventos." : "No hay eventos para este filtro."}
+                </p>
+            )}
+
+            {filteredEvents.map((ev) => (
                 <div className="card" key={ev.id}>
                     <strong>{ev.title}</strong>
                     <div>

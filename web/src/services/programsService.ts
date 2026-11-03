@@ -1,3 +1,4 @@
+// src/services/programsService.ts
 import {
     addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc,
 } from "firebase/firestore";
@@ -34,6 +35,7 @@ export async function listPrograms(): Promise<Program[]> {
             collective: data.collective ?? "",
             hosts: data.hosts ?? [],
             active: data.active ?? true,
+            artworkDriveId: data.artworkDriveId ?? "",
         } satisfies Program;
     });
     // Sorted on the client, so no Firestore index is needed.

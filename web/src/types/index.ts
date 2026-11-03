@@ -1,3 +1,4 @@
+// src/types/index.ts
 export interface RadioEvent {
     id: string;
     title: string;
@@ -19,9 +20,28 @@ export interface Program {
     collective: string;
     hosts: string[];
     active: boolean;
+    artworkDriveId: string; // Google Drive file ID of the 1024x1024 image
 }
 
 export type ProgramInput = Omit<Program, "id">;
+
+export type PodcastStatus = "pendiente" | "en_proceso" | "lista" | "error";
+
+export interface Podcast {
+    id: string;
+    programId: string;
+    programName: string;
+    airDate: Date;
+    audioUrl: string; // Drive file ID, same format as Program.artworkDriveId
+    imageUrl: string | null; // Drive file ID, or null to use the program image
+    status: PodcastStatus;
+    errorMessage: string;
+}
+
+export type PodcastInput = Pick<
+    Podcast,
+    "programId" | "programName" | "airDate" | "audioUrl" | "imageUrl"
+>;
 
 export type Campus = "cucuta" | "ocana";
 export type Modality = "presencial" | "distancia";

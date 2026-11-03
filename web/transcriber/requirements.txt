@@ -1,0 +1,4 @@
+faster-whisper
+gdown
+firebase-admin
+av<19
