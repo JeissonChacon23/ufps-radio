@@ -6,7 +6,7 @@ const NAV_ITEMS = [
     { to: "/events", label: "Eventos" },
     { to: "/programs", label: "Programación" },
     { to: "/podcasts", label: "Podcast" },
-    { to: "/careers", label: "Carreras" },
+    { to: "/careers", label: "Estructura UFPS" },
 ];
 
 export default function Layout() {
@@ -16,10 +16,19 @@ export default function Layout() {
         <div className="shell">
             <aside className="sidebar">
                 <div className="brand">
-                    <span className="brand-dot" aria-hidden="true" />
-                    <div>
-                        <strong>UFPS Radio 95.2</strong>
-                        <small>Administración</small>
+                    <img
+                        src="/favicon.svg"
+                        alt="Logo UFPS"
+                        className="brand-logo"
+                        width={40}
+                        height={40}
+                    />
+                    <div className="brand-text">
+                        <div className="brand-title-row">
+                            <strong>UFPS Radio 95.2</strong>
+                            <span className="brand-dot" title="95.2 FM" aria-hidden="true" />
+                        </div>
+                        <small>Emisora Institucional · Admin</small>
                     </div>
                 </div>
 

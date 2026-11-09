@@ -1,3 +1,4 @@
+// src/constants/audiences.ts
 export interface AudienceOption {
     id: string;
     label: string;
@@ -5,10 +6,10 @@ export interface AudienceOption {
 
 // Same values as the profileType saved in users/{uid}.
 export const PROFILE_AUDIENCES: AudienceOption[] = [
-    { id: "todos", label: "Todos" },
-    { id: "estudiante", label: "Estudiantes (todas las carreras)" },
+    { id: "todos", label: "Todos (toda la comunidad)" },
+    { id: "estudiante", label: "Estudiantes" },
     { id: "egresado", label: "Egresados" },
-    { id: "personal_ufps", label: "Personal UFPS (docentes y administrativos)" },
+    { id: "personal_ufps", label: "Docentes y administrativos (Personal UFPS)" },
     { id: "invitado", label: "Invitados y comunidad en general" },
 ];
 

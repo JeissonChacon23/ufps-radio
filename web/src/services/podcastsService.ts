@@ -3,6 +3,7 @@ import {
     addDoc, collection, deleteDoc, deleteField, doc, onSnapshot, serverTimestamp,
     Timestamp, updateDoc,
 } from "firebase/firestore";
+import { toTimeInput } from "../lib/dates";
 import { db } from "../lib/firebase";
 import type { Podcast, PodcastInput, PodcastStatus } from "../types";
 
@@ -13,6 +14,7 @@ export async function createPodcast(input: PodcastInput): Promise<void> {
         programId: input.programId,
         programName: input.programName,
         airDate: Timestamp.fromDate(input.airDate),
+        airTime: input.airTime,
         audioUrl: input.audioUrl,
         imageUrl: input.imageUrl,
         status: "pendiente",
@@ -33,11 +35,17 @@ export function observePodcasts(
                 const data = d.data();
                 const airDate = data.airDate as Timestamp | undefined;
                 if (!airDate) continue; // documents from the first version of this page
+                const dateObj = airDate.toDate();
+                const airTime: string =
+                    typeof data.airTime === "string" && data.airTime
+                        ? data.airTime
+                        : toTimeInput(dateObj);
                 podcasts.push({
                     id: d.id,
                     programId: data.programId ?? "",
                     programName: data.programName ?? "",
-                    airDate: airDate.toDate(),
+                    airDate: dateObj,
+                    airTime,
                     audioUrl: data.audioUrl ?? "",
                     imageUrl: data.imageUrl ?? null,
                     status: (data.status ?? "pendiente") as PodcastStatus,

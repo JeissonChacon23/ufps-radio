@@ -22,16 +22,25 @@ export default function Login() {
     };
 
     return (
-        <form className="container card" onSubmit={handleSubmit}>
-            <h2>Iniciar sesión</h2>
-            <label>Correo
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </label>
-            <label>Contraseña
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            </label>
-            {error && <p className="error">{error}</p>}
-            <button type="submit">Entrar</button>
-        </form>
+        <div className="login-wrap">
+            <form className="container card login-card" onSubmit={handleSubmit}>
+                <div className="login-brand">
+                    <img src="/ufps-horizontal.png" alt="Universidad Francisco de Paula Santander" className="login-logo" />
+                    <div className="login-station">
+                        <span className="brand-dot" aria-hidden="true" />
+                        <strong>UFPS Radio 95.2 F.M.</strong>
+                    </div>
+                </div>
+                <h2>Panel de administración</h2>
+                <label>Correo institucional
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                </label>
+                <label>Contraseña
+                    <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                </label>
+                {error && <p className="error">{error}</p>}
+                <button type="submit">Entrar</button>
+            </form>
+        </div>
     );
 }

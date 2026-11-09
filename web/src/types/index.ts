@@ -5,8 +5,11 @@ export interface RadioEvent {
     audience: string[];
     description: string;
     link: string; // empty string when there is no link
+    specialGuest: string; // empty string when there is no special guest
     date: Date;
     endDate: Date | null;
+    startTime: string; // "HH:mm"
+    endTime: string; // "HH:mm" or ""
 }
 
 export type EventInput = Omit<RadioEvent, "id">;
@@ -32,6 +35,7 @@ export interface Podcast {
     programId: string;
     programName: string;
     airDate: Date;
+    airTime: string; // "HH:mm"
     audioUrl: string; // Drive file ID, same format as Program.artworkDriveId
     imageUrl: string | null; // Drive file ID, or null to use the program image
     status: PodcastStatus;
@@ -40,16 +44,20 @@ export interface Podcast {
 
 export type PodcastInput = Pick<
     Podcast,
-    "programId" | "programName" | "airDate" | "audioUrl" | "imageUrl"
+    "programId" | "programName" | "airDate" | "airTime" | "audioUrl" | "imageUrl"
 >;
 
 export type Campus = "cucuta" | "ocana";
 export type Modality = "presencial" | "distancia";
+export type AcademicLevel = "pregrado" | "posgrado";
 
 export interface Career {
     id: string;
     name: string;
     faculty: string;
+    department: string;
+    departmentId: string; // e.g. "dept:departamento-de-sistemas-e-informatica"
+    level: AcademicLevel;
     campus: Campus;
     modality: Modality;
     active: boolean;

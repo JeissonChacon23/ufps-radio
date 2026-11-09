@@ -29,7 +29,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 MODEL_SIZE = os.getenv("WHISPER_MODEL", "small")
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "30"))
 STUCK_AFTER_MINUTES = int(os.getenv("STUCK_AFTER_MINUTES", "180"))
-MAX_KEYWORDS = 80
+MAX_KEYWORDS = 500
 MIN_WORD_LENGTH = 3
 MAX_TRANSCRIPT_BYTES = 900_000  # a Firestore document is limited to 1 MiB
 

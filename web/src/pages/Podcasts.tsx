@@ -2,8 +2,17 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import DriveImage from "../components/DriveImage";
 import DriveImageField from "../components/DriveImageField";
+import TimeInput from "../components/TimeInput";
+import { DAYS } from "../constants/audiences";
 import { driveAudioUrl, extractDriveId } from "../lib/drive";
-import { formatDate, fromDateInput, toDateInput } from "../lib/dates";
+import {
+    currentTimeString,
+    formatDate,
+    formatTime12h,
+    fromDateInput,
+    toDateInput,
+    todayIsoWeekday,
+} from "../lib/dates";
 import { normalizeText } from "../lib/text";
 import { createPodcast, deletePodcast, observePodcasts, retryPodcast } from "../services/podcastsService";
 import { listPrograms } from "../services/programsService";
@@ -12,11 +21,18 @@ import type { Podcast, PodcastStatus, Program } from "../types";
 interface EpisodeForm {
     programId: string;
     airDate: string;
+    airTime: string;
     audioLink: string;
     imageLink: string;
 }
 
-const EMPTY_FORM: EpisodeForm = { programId: "", airDate: "", audioLink: "", imageLink: "" };
+const EMPTY_FORM: EpisodeForm = {
+    programId: "",
+    airDate: "",
+    airTime: "",
+    audioLink: "",
+    imageLink: "",
+};
 
 const STATUS_LABEL: Record<PodcastStatus, string> = {
     pendiente: "Pendiente",
@@ -55,6 +71,20 @@ export default function Podcasts() {
 
     const audioId = extractDriveId(form.audioLink);
     const today = toDateInput(new Date());
+    const nowTime = currentTimeString();
+    const todayIso = todayIsoWeekday();
+
+    // W9: If airDate is today (or not yet chosen), check if a program's emission for today is in the future.
+    const isProgramFutureToday = (p: Program, selectedDate: string): boolean => {
+        if (selectedDate === today) {
+            return p.startTime > nowTime;
+        }
+        if (!selectedDate) {
+            // If program only airs today and its start time hasn't happened yet
+            return p.days.length === 1 && p.days[0] === todayIso && p.startTime > nowTime;
+        }
+        return false;
+    };
 
     const filtered = useMemo(() => {
         const term = normalizeText(search.trim());
@@ -67,6 +97,15 @@ export default function Podcasts() {
 
     const setField = <K extends keyof EpisodeForm>(key: K, value: EpisodeForm[K]) =>
         setForm((prev) => ({ ...prev, [key]: value }));
+
+    const handleProgramChange = (programId: string) => {
+        const prog = programs.find((p) => p.id === programId);
+        setForm((prev) => ({
+            ...prev,
+            programId,
+            airTime: prog ? prog.startTime : prev.airTime,
+        }));
+    };
 
     // The episode image, or the program image when the episode has none.
     const imageIdFor = (ep: Podcast): string | null =>
@@ -83,13 +122,25 @@ export default function Podcasts() {
             setError("Elige el programa del episodio.");
             return;
         }
+        if (!form.airDate) {
+            setError("Selecciona la fecha de emisión.");
+            return;
+        }
+        const effectiveTime = form.airTime || program.startTime || "12:00";
+        if (form.airDate > today) {
+            setError("Un podcast corresponde a un programa ya emitido: la fecha de emisión no puede ser futura.");
+            return;
+        }
+        if (form.airDate === today && effectiveTime > currentTimeString()) {
+            setError(
+                `El programa «${program.name}» aún no se ha emitido hoy (${formatTime12h(effectiveTime)}). Solo puedes registrar programas que ya se emitieron.`,
+            );
+            return;
+        }
+
         const audio = extractDriveId(form.audioLink);
         if (!audio) {
             setError("Pega el enlace de Google Drive del audio.");
-            return;
-        }
-        if (form.airDate > today) {
-            setError("La fecha de emisión no puede ser posterior a hoy.");
             return;
         }
         const imageText = form.imageLink.trim();
@@ -104,7 +155,8 @@ export default function Podcasts() {
             await createPodcast({
                 programId: program.id,
                 programName: program.name,
-                airDate: fromDateInput(form.airDate),
+                airDate: fromDateInput(form.airDate, effectiveTime),
+                airTime: effectiveTime,
                 audioUrl: audio,
                 imageUrl: image,
             });
@@ -137,29 +189,55 @@ export default function Podcasts() {
     return (
         <>
             <form className="card" onSubmit={handleSubmit}>
-                <h2>Nuevo episodio</h2>
+                <h2>Nuevo episodio (Podcast)</h2>
+                <p className="muted">
+                    Solo se pueden registrar emisiones que ya hayan ocurrido (fecha y hora anteriores o iguales al momento actual).
+                </p>
 
-                <label>Programa
-                    <select value={form.programId} onChange={(e) => setField("programId", e.target.value)} required>
-                        <option value="">Elige un programa</option>
-                        {programs.map((p) => (
-                            <option key={p.id} value={p.id}>{p.name}{!p.active && " (inactivo)"}</option>
-                        ))}
+                <div className="row">
+                    <label>Fecha de emisión
+                        <input
+                            type="date"
+                            value={form.airDate}
+                            max={today}
+                            onChange={(e) => setField("airDate", e.target.value)}
+                            required
+                        />
+                    </label>
+                    <label>Hora de emisión
+                        <TimeInput
+                            value={form.airTime}
+                            onChange={(val) => setField("airTime", val)}
+                            required
+                        />
+                    </label>
+                </div>
+
+                <label>Programa de la parrilla
+                    <select
+                        value={form.programId}
+                        onChange={(e) => handleProgramChange(e.target.value)}
+                        required
+                    >
+                        <option value="">Elige un programa emitido</option>
+                        {programs.map((p) => {
+                            const futureToday = isProgramFutureToday(p, form.airDate);
+                            const daysText = DAYS.filter((d) => p.days.includes(d.value))
+                                .map((d) => d.short)
+                                .join(", ");
+                            return (
+                                <option key={p.id} value={p.id} disabled={futureToday}>
+                                    {p.name} ({daysText} · {formatTime12h(p.startTime)})
+                                    {!p.active ? " [inactivo]" : ""}
+                                    {futureToday ? " — aún no emitido hoy" : ""}
+                                </option>
+                            );
+                        })}
                     </select>
                 </label>
                 {programs.length === 0 && (
                     <p className="muted">Primero registra al menos un programa en la sección Programación.</p>
                 )}
-
-                <label>Fecha de emisión
-                    <input
-                        type="date"
-                        value={form.airDate}
-                        max={today}
-                        onChange={(e) => setField("airDate", e.target.value)}
-                        required
-                    />
-                </label>
 
                 <div className="drive-field">
                     <label>Enlace de Google Drive del audio
@@ -199,10 +277,10 @@ export default function Podcasts() {
             </form>
 
             <div className="section-head">
-                <h2>Episodios</h2>
+                <h2>Episodios publicados</h2>
                 <span className="muted">
-          {filtered.length} {filtered.length === 1 ? "episodio" : "episodios"}
-        </span>
+                    {filtered.length} {filtered.length === 1 ? "episodio" : "episodios"}
+                </span>
             </div>
 
             <div className="chips">
@@ -243,6 +321,7 @@ export default function Podcasts() {
 
             {filtered.map((ep) => {
                 const imageId = imageIdFor(ep);
+                const prog = programs.find((p) => p.id === ep.programId);
                 return (
                     <div className="card media-card" key={ep.id}>
                         {imageId ? <DriveImage id={imageId} size={160} /> : <div className="thumb placeholder" />}
@@ -251,7 +330,13 @@ export default function Podcasts() {
                                 <strong>{ep.programName}</strong>
                                 <span className={STATUS_CLASS[ep.status]}>{STATUS_LABEL[ep.status]}</span>
                             </div>
-                            <div>{formatDate(ep.airDate)}</div>
+                            <div className="muted">
+                                {formatDate(ep.airDate)}
+                                {ep.airTime && ` · ${formatTime12h(ep.airTime)}`}
+                            </div>
+                            {prog && prog.hosts.length > 0 && (
+                                <div>Locutores: {prog.hosts.join(", ")}</div>
+                            )}
                             {ep.status === "error" && ep.errorMessage && <p className="error">{ep.errorMessage}</p>}
                             <div className="row">
                                 {ep.status === "error" && (

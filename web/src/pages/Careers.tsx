@@ -1,20 +1,29 @@
 // src/pages/Careers.tsx
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { groupCareers } from "../lib/careers";
+import { groupByFacultyAndDepartment } from "../lib/careers";
 import { normalizeText } from "../lib/text";
 import {
     createCareer, listCareers, seedCareers, setCareerActive, updateCareer,
 } from "../services/careersService";
-import type { Campus, Career, Modality } from "../types";
+import type { AcademicLevel, Campus, Career, Modality } from "../types";
 
 interface CareerForm {
     name: string;
     faculty: string;
+    department: string;
+    level: AcademicLevel;
     campus: Campus;
     modality: Modality;
 }
 
-const EMPTY_FORM: CareerForm = { name: "", faculty: "", campus: "cucuta", modality: "presencial" };
+const EMPTY_FORM: CareerForm = {
+    name: "",
+    faculty: "",
+    department: "",
+    level: "pregrado",
+    campus: "cucuta",
+    modality: "presencial",
+};
 
 type StatusFilter = "all" | "active" | "inactive";
 
@@ -39,11 +48,20 @@ export default function Careers() {
         [careers],
     );
 
+    const departments = useMemo(() => {
+        const filtered = form.faculty.trim()
+            ? careers.filter((c) => c.faculty === form.faculty.trim())
+            : careers;
+        return [...new Set(filtered.map((c) => c.department))].sort((a, b) => a.localeCompare(b));
+    }, [careers, form.faculty]);
+
     const visible = useMemo(() => {
         const term = normalizeText(search.trim());
         return careers.filter((c) => {
             const statusOk = status === "all" || c.active === (status === "active");
-            const textOk = term === "" || normalizeText(c.name).includes(term);
+            const textOk =
+                term === "" ||
+                normalizeText(`${c.name} ${c.department} ${c.faculty}`).includes(term);
             return statusOk && textOk;
         });
     }, [careers, search, status]);
@@ -62,6 +80,8 @@ export default function Careers() {
         setForm({
             name: career.name,
             faculty: career.faculty,
+            department: career.department,
+            level: career.level,
             campus: career.campus,
             modality: career.modality,
         });
@@ -77,9 +97,10 @@ export default function Careers() {
         setMessage("");
 
         const faculty = form.faculty.trim();
+        const department = form.department.trim();
         let name = form.name.trim();
-        if (!name || !faculty) {
-            setError("Escribe el nombre de la carrera y la facultad.");
+        if (!name || !faculty || !department) {
+            setError("Escribe el nombre del programa, la facultad y el departamento.");
             return;
         }
         if (form.campus === "ocana" && !/oca[ñn]a/i.test(name)) {
@@ -88,20 +109,27 @@ export default function Careers() {
 
         setSaving(true);
         try {
-            const input = { name, faculty, campus: form.campus, modality: form.modality };
+            const input = {
+                name,
+                faculty,
+                department,
+                level: form.level,
+                campus: form.campus,
+                modality: form.modality,
+            };
             if (editingId) {
                 await updateCareer(editingId, input);
                 resetForm();
-                setMessage("Carrera actualizada.");
+                setMessage("Programa académico actualizado.");
             } else {
                 const nextOrder = Math.max(0, ...careers.map((c) => c.order)) + 1;
                 await createCareer(input, nextOrder);
                 resetForm();
-                setMessage("Carrera agregada y habilitada.");
+                setMessage("Programa académico agregado y habilitado.");
             }
             await reload();
         } catch {
-            setError("No se pudo guardar la carrera.");
+            setError("No se pudo guardar el programa académico.");
         } finally {
             setSaving(false);
         }
@@ -116,7 +144,7 @@ export default function Careers() {
                 prev.map((c) => (c.id === career.id ? { ...c, active: !c.active } : c)),
             );
         } catch {
-            setError("No se pudo cambiar el estado de la carrera.");
+            setError("No se pudo cambiar el estado del programa.");
         }
     };
 
@@ -126,35 +154,64 @@ export default function Careers() {
         try {
             const created = await seedCareers();
             setMessage(
-                created === 0 ? "Todas las carreras iniciales ya estaban cargadas." : `Se cargaron ${created} carreras.`,
+                created === 0
+                    ? "Toda la estructura inicial (Facultad → Departamento → Programa) ya estaba sincronizada."
+                    : `Se sincronizaron ${created} programas y departamentos en Firestore.`,
             );
             await reload();
         } catch {
-            setError("No se pudieron cargar las carreras iniciales.");
+            setError("No se pudo sincronizar la estructura inicial.");
         }
     };
 
     return (
         <>
             <form className="card" onSubmit={handleSubmit}>
-                <h2>{editingId ? "Editar carrera" : "Nueva carrera"}</h2>
+                <h2>{editingId ? "Editar programa académico" : "Nuevo programa académico"}</h2>
                 <p className="muted">
-                    Las carreras inhabilitadas no aparecen en el registro de la app ni al crear eventos.
-                    Los estudiantes que ya se registraron conservan su perfil.
+                    Estructura dinámica en Firestore: <strong>Facultad → Departamento → Programa</strong>.
+                    Los docentes se segmentan por departamento y los estudiantes/egresados por programa.
                 </p>
 
-                <label>Nombre
+                <label>Nombre del programa (pregrado o posgrado)
                     <input value={form.name} onChange={(e) => setField("name", e.target.value)} required />
                 </label>
 
-                <label>Facultad
-                    <input list="faculties" value={form.faculty} onChange={(e) => setField("faculty", e.target.value)} required />
-                    <datalist id="faculties">
-                        {faculties.map((f) => <option key={f} value={f} />)}
-                    </datalist>
-                </label>
+                <div className="row">
+                    <label>Facultad
+                        <input
+                            list="faculties"
+                            value={form.faculty}
+                            onChange={(e) => setField("faculty", e.target.value)}
+                            placeholder="Ej. Facultad de Ingeniería"
+                            required
+                        />
+                        <datalist id="faculties">
+                            {faculties.map((f) => <option key={f} value={f} />)}
+                        </datalist>
+                    </label>
+
+                    <label>Departamento
+                        <input
+                            list="departments"
+                            value={form.department}
+                            onChange={(e) => setField("department", e.target.value)}
+                            placeholder="Ej. Departamento de Sistemas e Informática"
+                            required
+                        />
+                        <datalist id="departments">
+                            {departments.map((d) => <option key={d} value={d} />)}
+                        </datalist>
+                    </label>
+                </div>
 
                 <div className="row">
+                    <label>Nivel académico
+                        <select value={form.level} onChange={(e) => setField("level", e.target.value as AcademicLevel)}>
+                            <option value="pregrado">Pregrado</option>
+                            <option value="posgrado">Posgrado</option>
+                        </select>
+                    </label>
                     <label>Sede
                         <select value={form.campus} onChange={(e) => setField("campus", e.target.value as Campus)}>
                             <option value="cucuta">Cúcuta</option>
@@ -170,11 +227,11 @@ export default function Careers() {
                 </div>
 
                 {error && <p className="error">{error}</p>}
-                {message && <p className="muted">{message}</p>}
+                {message && <p className="ok">{message}</p>}
 
                 <div className="row">
                     <button type="submit" disabled={saving}>
-                        {saving ? "Guardando…" : editingId ? "Guardar cambios" : "Agregar carrera"}
+                        {saving ? "Guardando…" : editingId ? "Guardar cambios" : "Agregar programa"}
                     </button>
                     {editingId && (
                         <button type="button" className="secondary" onClick={resetForm}>Cancelar edición</button>
@@ -183,56 +240,64 @@ export default function Careers() {
             </form>
 
             <div className="section-head">
-                <h2>Carreras</h2>
-                <span className="muted">{activeCount} habilitadas de {careers.length}</span>
+                <h2>Estructura académica (Facultad → Departamento → Programa)</h2>
+                <span className="muted">{activeCount} habilitados de {careers.length}</span>
             </div>
 
             <div className="toolbar">
                 <input
                     className="search"
                     type="search"
-                    placeholder="Buscar carrera"
+                    placeholder="Buscar por programa, departamento o facultad"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
                 <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
-                    <option value="all">Todas</option>
-                    <option value="active">Habilitadas</option>
-                    <option value="inactive">Inhabilitadas</option>
+                    <option value="all">Todos</option>
+                    <option value="active">Habilitados</option>
+                    <option value="inactive">Inhabilitados</option>
                 </select>
             </div>
 
-            {visible.length === 0 && <p className="empty">No hay carreras para este filtro.</p>}
+            {visible.length === 0 && <p className="empty">No hay programas para este filtro.</p>}
 
-            {groupCareers(visible).map((group) => (
-                <div className="card" key={group.title}>
-                    <strong>{group.title}</strong>
-                    <div>
-                        {group.careers.map((c) => (
-                            <div className="list-row" key={c.id}>
-                                <div>
-                                    {c.name}{" "}
-                                    {c.modality === "distancia" && <span className="tag">Distancia</span>}{" "}
-                                    {!c.active && <span className="tag off">Inhabilitada</span>}
-                                </div>
-                                <div className="row">
-                                    <label className="switch">
-                                        <input type="checkbox" checked={c.active} onChange={() => toggleActive(c)} />
-                                        Habilitada
-                                    </label>
-                                    <button className="ghost" onClick={() => startEdit(c)}>Editar</button>
-                                </div>
+            {groupByFacultyAndDepartment(visible).map((facultyGroup) => (
+                <div className="card" key={facultyGroup.title}>
+                    <strong>{facultyGroup.title}</strong>
+                    {facultyGroup.departments.map((dept) => (
+                        <div className="dept-group" key={dept.departmentId}>
+                            <div className="dept-title">{dept.department}</div>
+                            <div>
+                                {dept.careers.map((c) => (
+                                    <div className="list-row" key={c.id}>
+                                        <div className="row">
+                                            <span>{c.name}</span>
+                                            {c.level === "posgrado" && <span className="tag">Posgrado</span>}
+                                            {c.modality === "distancia" && <span className="tag">Distancia</span>}
+                                            {!c.active && <span className="tag off">Inhabilitado</span>}
+                                        </div>
+                                        <div className="row">
+                                            <label className="switch">
+                                                <input type="checkbox" checked={c.active} onChange={() => toggleActive(c)} />
+                                                Habilitado
+                                            </label>
+                                            <button className="ghost" onClick={() => startEdit(c)}>Editar</button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
+                        </div>
+                    ))}
                 </div>
             ))}
 
             <details className="card">
                 <summary>Herramientas</summary>
-                <p className="muted">Carga las carreras iniciales que falten. No toca las que ya existen.</p>
+                <p className="muted">
+                    Sincroniza la estructura inicial de Facultades, Departamentos y Programas en Firestore sin borrar tus cambios.
+                </p>
                 <div>
-                    <button className="ghost" onClick={handleSeed}>Cargar carreras iniciales</button>
+                    <button className="ghost" onClick={handleSeed}>Sincronizar estructura inicial</button>
                 </div>
             </details>
         </>

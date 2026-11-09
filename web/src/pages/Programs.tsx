@@ -2,8 +2,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import DriveImage from "../components/DriveImage";
 import DriveImageField from "../components/DriveImageField";
+import TimeInput from "../components/TimeInput";
 import { DAYS } from "../constants/audiences";
-import { addMinutes } from "../lib/dates";
+import {
+    addMinutes,
+    currentTimeString,
+    formatTime12h,
+    timeToMinutes,
+    todayIsoWeekday,
+} from "../lib/dates";
 import { driveViewUrl, extractDriveId } from "../lib/drive";
 import { normalizeText } from "../lib/text";
 import { createProgram, deleteProgram, listPrograms, updateProgram } from "../services/programsService";
@@ -13,7 +20,7 @@ interface ProgramForm {
     name: string;
     days: number[];
     startTime: string;
-    durationMinutes: number;
+    durationMinutes: string;
     collective: string;
     hosts: string;
     active: boolean;
@@ -21,8 +28,14 @@ interface ProgramForm {
 }
 
 const EMPTY_FORM: ProgramForm = {
-    name: "", days: [], startTime: "", durationMinutes: 60, collective: "", hosts: "",
-    active: true, artworkLink: "",
+    name: "",
+    days: [],
+    startTime: "",
+    durationMinutes: "60",
+    collective: "",
+    hosts: "",
+    active: true,
+    artworkLink: "",
 };
 
 type StatusFilter = "all" | "active" | "inactive";
@@ -72,7 +85,7 @@ export default function Programs() {
             name: p.name,
             days: p.days,
             startTime: p.startTime,
-            durationMinutes: p.durationMinutes,
+            durationMinutes: String(p.durationMinutes),
             collective: p.collective,
             hosts: p.hosts.join(", "),
             active: p.active,
@@ -86,22 +99,69 @@ export default function Programs() {
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
         setError("");
+
         if (form.days.length === 0) {
-            setError("Selecciona al menos un día.");
+            setError("Selecciona al menos un día de emisión.");
             return;
         }
+        if (!form.startTime || !/^\d{2}:\d{2}$/.test(form.startTime)) {
+            setError("Selecciona la hora de inicio del programa.");
+            return;
+        }
+
+        const duration = Math.round(Number(form.durationMinutes));
+        if (!Number.isFinite(duration) || duration < 1 || duration > 720) {
+            setError("Ingresa una duración válida entre 1 y 720 minutos.");
+            return;
+        }
+
         const artworkDriveId = extractDriveId(form.artworkLink);
         if (!artworkDriveId) {
             setError("Pega un enlace válido de Google Drive para la imagen del programa.");
             return;
         }
+
+        // W1: Do not allow registering or moving a program on today's weekday to a past time.
+        const todayIso = todayIsoWeekday();
+        const nowTime = currentTimeString();
+        if (form.days.includes(todayIso) && form.startTime < nowTime) {
+            const todayLabel = DAYS.find((d) => d.value === todayIso)?.label ?? "hoy";
+            setError(
+                `No se puede registrar ni mover un programa del día de hoy (${todayLabel}) a una hora que ya pasó (${formatTime12h(form.startTime)}). Hora actual: ${formatTime12h(nowTime)}.`,
+            );
+            return;
+        }
+
+        // W2: Validate schedule overlaps on shared emission days.
+        const newStart = timeToMinutes(form.startTime);
+        const newEnd = newStart + duration;
+        for (const other of programs) {
+            if (other.id === editingId) continue;
+            if (!other.active && !form.active) continue;
+            const sharedDays = form.days.filter((d) => other.days.includes(d));
+            if (sharedDays.length === 0) continue;
+
+            const otherStart = timeToMinutes(other.startTime);
+            const otherEnd = otherStart + other.durationMinutes;
+            if (newStart < otherEnd && otherStart < newEnd) {
+                const dayNames = DAYS.filter((d) => sharedDays.includes(d.value))
+                    .map((d) => d.label)
+                    .join(", ");
+                const otherEndStr = addMinutes(other.startTime, other.durationMinutes);
+                setError(
+                    `Cruce de horario: el programa se solapa el día ${dayNames} con «${other.name}» (${other.startTime} – ${otherEndStr}).`,
+                );
+                return;
+            }
+        }
+
         setSaving(true);
         try {
             const input = {
                 name: form.name.trim(),
                 days: form.days,
                 startTime: form.startTime,
-                durationMinutes: form.durationMinutes,
+                durationMinutes: duration,
                 collective: form.collective.trim(),
                 hosts: form.hosts.split(",").map((h) => h.trim()).filter(Boolean),
                 active: form.active,
@@ -128,6 +188,11 @@ export default function Programs() {
         setPrograms(await listPrograms());
     };
 
+    const selectedDayLabel =
+        dayFilter === "all"
+            ? "Toda la semana"
+            : DAYS.find((d) => d.value === dayFilter)?.label ?? "";
+
     return (
         <>
             <form className="card" onSubmit={handleSubmit}>
@@ -138,7 +203,7 @@ export default function Programs() {
                 </label>
 
                 <DriveImageField
-                    label="Imagen del programa (artwork)"
+                    label="Imagen del programa (artwork 1024x1024)"
                     value={form.artworkLink}
                     onChange={(value) => setField("artworkLink", value)}
                 />
@@ -157,27 +222,36 @@ export default function Programs() {
 
                 <div className="row">
                     <label>Hora de inicio
-                        <input type="time" value={form.startTime} onChange={(e) => setField("startTime", e.target.value)} required />
+                        <TimeInput
+                            value={form.startTime}
+                            onChange={(val) => setField("startTime", val)}
+                            required
+                        />
                     </label>
                     <label>Duración (minutos)
                         <input
                             type="number"
-                            min={5}
-                            step={5}
+                            inputMode="numeric"
+                            min={1}
+                            max={720}
+                            step={1}
                             value={form.durationMinutes}
-                            onChange={(e) => setField("durationMinutes", Number(e.target.value))}
+                            onChange={(e) => setField("durationMinutes", e.target.value)}
+                            placeholder="Ej. 20, 60"
                             required
                         />
                     </label>
                 </div>
 
-                <label>Colectivo
-                    <input value={form.collective} onChange={(e) => setField("collective", e.target.value)} />
-                </label>
+                <div className="row">
+                    <label>Colectivo
+                        <input value={form.collective} onChange={(e) => setField("collective", e.target.value)} />
+                    </label>
 
-                <label>Locutores (separados por coma)
-                    <input value={form.hosts} onChange={(e) => setField("hosts", e.target.value)} />
-                </label>
+                    <label>Locutores (separados por coma)
+                        <input value={form.hosts} onChange={(e) => setField("hosts", e.target.value)} />
+                    </label>
+                </div>
 
                 <label className="check">
                     <input type="checkbox" checked={form.active} onChange={(e) => setField("active", e.target.checked)} />
@@ -197,10 +271,12 @@ export default function Programs() {
             </form>
 
             <div className="section-head">
-                <h2>Programación publicada</h2>
+                <div>
+                    <h2>Programación publicada · {selectedDayLabel}</h2>
+                </div>
                 <span className="muted">
-          {filteredPrograms.length} {filteredPrograms.length === 1 ? "programa" : "programas"}
-        </span>
+                    {filteredPrograms.length} {filteredPrograms.length === 1 ? "programa" : "programas"}
+                </span>
             </div>
 
             <div className="chips">
@@ -218,7 +294,7 @@ export default function Programs() {
                         className={dayFilter === d.value ? "chip active" : "chip"}
                         onClick={() => setDayFilter(d.value)}
                     >
-                        {d.short} <small>{programs.filter((p) => p.days.includes(d.value)).length}</small>
+                        {d.label} <small>{programs.filter((p) => p.days.includes(d.value)).length}</small>
                     </button>
                 ))}
             </div>
@@ -244,29 +320,42 @@ export default function Programs() {
                 </p>
             )}
 
-            {filteredPrograms.map((p) => (
-                <div className="card media-card" key={p.id}>
-                    {p.artworkDriveId
-                        ? <DriveImage id={p.artworkDriveId} size={160} />
-                        : <div className="thumb placeholder" />}
-                    <div className="media-body">
-                        <div className="row">
-                            <strong>{p.name}</strong>
-                            {!p.active && <span className="tag off">Inactivo</span>}
-                        </div>
-                        <div>
-                            {DAYS.filter((d) => p.days.includes(d.value)).map((d) => d.short).join(", ")} ·{" "}
-                            {p.startTime} – {addMinutes(p.startTime, p.durationMinutes)} ({p.durationMinutes} min)
-                        </div>
-                        {p.collective && <div>Colectivo: {p.collective}</div>}
-                        <div>Locutores: {p.hosts.join(", ") || "—"}</div>
-                        <div className="row">
-                            <button onClick={() => startEdit(p)}>Editar</button>
-                            <button className="danger" onClick={() => handleDelete(p.id)}>Eliminar</button>
+            {filteredPrograms.map((p) => {
+                const endStr = addMinutes(p.startTime, p.durationMinutes);
+                return (
+                    <div className="card media-card" key={p.id}>
+                        {p.artworkDriveId
+                            ? <DriveImage id={p.artworkDriveId} size={160} />
+                            : <div className="thumb placeholder" />}
+                        <div className="media-body">
+                            <div className="row">
+                                <strong>{p.name}</strong>
+                                {!p.active && <span className="tag off">Inactivo</span>}
+                            </div>
+                            <div className="muted">
+                                <strong>{formatTime12h(p.startTime)} – {formatTime12h(endStr)}</strong>{" "}
+                                ({p.startTime} – {endStr} · {p.durationMinutes} min)
+                            </div>
+                            <div className="row day-tags">
+                                {DAYS.filter((d) => p.days.includes(d.value)).map((d) => (
+                                    <span
+                                        key={d.value}
+                                        className={dayFilter === d.value ? "tag active-day" : "tag"}
+                                    >
+                                        {d.short}
+                                    </span>
+                                ))}
+                            </div>
+                            {p.collective && <div>Colectivo: {p.collective}</div>}
+                            <div>Locutores: {p.hosts.join(", ") || "—"}</div>
+                            <div className="row">
+                                <button onClick={() => startEdit(p)}>Editar</button>
+                                <button className="danger" onClick={() => handleDelete(p.id)}>Eliminar</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
         </>
     );
 }
