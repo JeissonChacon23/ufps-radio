@@ -91,7 +91,8 @@ export default function Events() {
     const isTodos = form.audience.includes("todos");
     const hasStudentOrGrad =
         form.audience.includes("estudiante") || form.audience.includes("egresado");
-    const hasDocente = form.audience.includes("personal_ufps");
+    const hasDocente =
+        form.audience.includes("docente") || form.audience.includes("personal_ufps");
 
     const filteredEvents = useMemo(() => {
         const term = normalizeText(search.trim());
@@ -121,7 +122,7 @@ export default function Events() {
 
         // Clean up academic filters that no longer apply to the remaining profiles
         const nextHasStudentOrGrad = next.includes("estudiante") || next.includes("egresado");
-        const nextHasDocente = next.includes("personal_ufps");
+        const nextHasDocente = next.includes("docente") || next.includes("personal_ufps");
         if (!nextHasStudentOrGrad) {
             const careerIds = new Set(careers.map((c) => c.id));
             next = next.filter((a) => !careerIds.has(a));

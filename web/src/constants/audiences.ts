@@ -7,10 +7,12 @@ export interface AudienceOption {
 // Same values as the profileType saved in users/{uid}.
 export const PROFILE_AUDIENCES: AudienceOption[] = [
     { id: "todos", label: "Todos (toda la comunidad)" },
-    { id: "estudiante", label: "Estudiantes" },
-    { id: "egresado", label: "Egresados" },
-    { id: "personal_ufps", label: "Docentes y administrativos (Personal UFPS)" },
-    { id: "invitado", label: "Invitados y comunidad en general" },
+    { id: "estudiante", label: "Estudiante" },
+    { id: "egresado", label: "Egresado" },
+    { id: "docente", label: "Docente" },
+    { id: "administrativo", label: "Administrativo" },
+    { id: "invitado", label: "Invitado" },
+    { id: "externo", label: "Externo" },
 ];
 
 export const DAYS = [

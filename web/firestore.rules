@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    match /events/{id}      { allow read: if isSignedIn(); allow write: if isAdmin(); }
+    match /programs/{id}    { allow read: if true;         allow write: if isAdmin(); }
+    match /podcasts/{id}    { allow read: if isSignedIn(); allow write: if isAdmin(); }
+    match /careers/{id}     { allow read: if isSignedIn(); allow write: if isAdmin(); }
+    match /socialLinks/{id} { allow read: if isSignedIn(); allow write: if isAdmin(); }
+    match /config/{id}      { allow read: if isSignedIn(); allow write: if isAdmin(); }
+
+    match /listeners/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && id.matches(request.auth.uid + '_.*')
+        && request.resource.data.keys().hasOnly([
+          'lastSeen', 'expireAt', 'platform',
+          'uid', 'name', 'email', 'profileType', 'careerId', 'departmentId'
+        ]);
+      allow delete: if isSignedIn() && (id.matches(request.auth.uid + '_.*') || isAdmin());
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() || (
+        isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.profileType in
+             ['estudiante', 'egresado', 'docente', 'administrativo', 'invitado', 'externo', 'personal_ufps']
+      );
+      allow delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+    }
+
+    match /admins/{id} {
+      allow read: if isSignedIn() && request.auth.uid == id;
+      allow write: if false;
+    }
+  }
+}

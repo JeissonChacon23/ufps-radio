@@ -8,6 +8,7 @@ import {
 import type { AcademicLevel, Campus, Career, Modality } from "../types";
 
 interface CareerForm {
+    code: string;
     name: string;
     faculty: string;
     department: string;
@@ -17,6 +18,7 @@ interface CareerForm {
 }
 
 const EMPTY_FORM: CareerForm = {
+    code: "",
     name: "",
     faculty: "",
     department: "",
@@ -61,7 +63,7 @@ export default function Careers() {
             const statusOk = status === "all" || c.active === (status === "active");
             const textOk =
                 term === "" ||
-                normalizeText(`${c.name} ${c.department} ${c.faculty}`).includes(term);
+                normalizeText(`${c.code} ${(c.alternateCodes ?? []).join(" ")} ${c.name} ${c.department} ${c.faculty}`).includes(term);
             return statusOk && textOk;
         });
     }, [careers, search, status]);
@@ -78,6 +80,7 @@ export default function Careers() {
 
     const startEdit = (career: Career) => {
         setForm({
+            code: career.code,
             name: career.name,
             faculty: career.faculty,
             department: career.department,
@@ -96,9 +99,14 @@ export default function Careers() {
         setError("");
         setMessage("");
 
+        const code = form.code.replace(/\D+/g, "").slice(0, 3);
         const faculty = form.faculty.trim();
         const department = form.department.trim();
         let name = form.name.trim();
+        if (code.length !== 3) {
+            setError("El código de la carrera debe tener 3 dígitos numéricos (ej. 115 para Ingeniería de Sistemas).");
+            return;
+        }
         if (!name || !faculty || !department) {
             setError("Escribe el nombre del programa, la facultad y el departamento.");
             return;
@@ -110,6 +118,7 @@ export default function Careers() {
         setSaving(true);
         try {
             const input = {
+                code,
                 name,
                 faculty,
                 department,
@@ -155,8 +164,8 @@ export default function Careers() {
             const created = await seedCareers();
             setMessage(
                 created === 0
-                    ? "Toda la estructura inicial (Facultad → Departamento → Programa) ya estaba sincronizada."
-                    : `Se sincronizaron ${created} programas y departamentos en Firestore.`,
+                    ? "Toda la estructura (Códigos de 3 dígitos, Facultad → Departamento → Programa) ya estaba sincronizada."
+                    : `Se sincronizaron ${created} programas con sus códigos institucionales en Firestore.`,
             );
             await reload();
         } catch {
@@ -169,13 +178,27 @@ export default function Careers() {
             <form className="card" onSubmit={handleSubmit}>
                 <h2>{editingId ? "Editar programa académico" : "Nuevo programa académico"}</h2>
                 <p className="muted">
-                    Estructura dinámica en Firestore: <strong>Facultad → Departamento → Programa</strong>.
-                    Los docentes se segmentan por departamento y los estudiantes/egresados por programa.
+                    Estructura en Firestore: <strong>Código (3 dígitos) · Facultad → Departamento → Programa</strong>.
+                    Los primeros 3 dígitos del código estudiantil de 7 dígitos (ej. <code>115</code> en <code>1151594</code>)
+                    identifican automáticamente la carrera del estudiante.
                 </p>
 
-                <label>Nombre del programa (pregrado o posgrado)
-                    <input value={form.name} onChange={(e) => setField("name", e.target.value)} required />
-                </label>
+                <div className="row">
+                    <label style={{ flex: "0 0 180px" }}>
+                        Código carrera (3 dígitos)
+                        <input
+                            value={form.code}
+                            onChange={(e) => setField("code", e.target.value.replace(/\D+/g, "").slice(0, 3))}
+                            placeholder="Ej. 115"
+                            maxLength={3}
+                            required
+                        />
+                    </label>
+                    <label style={{ flex: "1 1 280px" }}>
+                        Nombre del programa (pregrado o posgrado)
+                        <input value={form.name} onChange={(e) => setField("name", e.target.value)} required />
+                    </label>
+                </div>
 
                 <div className="row">
                     <label>Facultad
@@ -240,7 +263,7 @@ export default function Careers() {
             </form>
 
             <div className="section-head">
-                <h2>Estructura académica (Facultad → Departamento → Programa)</h2>
+                <h2>Estructura académica (Código · Facultad → Departamento → Programa)</h2>
                 <span className="muted">{activeCount} habilitados de {careers.length}</span>
             </div>
 
@@ -248,7 +271,7 @@ export default function Careers() {
                 <input
                     className="search"
                     type="search"
-                    placeholder="Buscar por programa, departamento o facultad"
+                    placeholder="Buscar por código (ej. 115), programa, departamento o facultad"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
@@ -271,6 +294,11 @@ export default function Careers() {
                                 {dept.careers.map((c) => (
                                     <div className="list-row" key={c.id}>
                                         <div className="row">
+                                            {c.code && (
+                                                <span className="tag active-day" title="Código institucional UFPS">
+                                                    Cód. {c.code}
+                                                </span>
+                                            )}
                                             <span>{c.name}</span>
                                             {c.level === "posgrado" && <span className="tag">Posgrado</span>}
                                             {c.modality === "distancia" && <span className="tag">Distancia</span>}
@@ -294,10 +322,10 @@ export default function Careers() {
             <details className="card">
                 <summary>Herramientas</summary>
                 <p className="muted">
-                    Sincroniza la estructura inicial de Facultades, Departamentos y Programas en Firestore sin borrar tus cambios.
+                    Sincroniza la estructura inicial de Códigos (3 dígitos), Facultades, Departamentos y Programas en Firestore.
                 </p>
                 <div>
-                    <button className="ghost" onClick={handleSeed}>Sincronizar estructura inicial</button>
+                    <button className="ghost" onClick={handleSeed}>Sincronizar códigos y estructura inicial</button>
                 </div>
             </details>
         </>

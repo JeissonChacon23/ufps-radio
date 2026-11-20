@@ -11,6 +11,7 @@ const careersRef = collection(db, "careers");
 const SEED_MAP = new Map(CAREERS_SEED.map((s) => [s.id, s]));
 
 export interface CareerInput {
+    code: string;
     name: string;
     faculty: string;
     department: string;
@@ -22,10 +23,12 @@ export interface CareerInput {
 export async function listCareers(): Promise<Career[]> {
     let snapshot = await getDocs(careersRef);
 
-    // Auto-seed or auto-migrate legacy documents that lack department/posgrado entries
+    // Auto-seed or auto-migrate legacy documents that lack code/department/posgrado entries
     const needsSync =
         snapshot.empty ||
-        snapshot.docs.some((d) => !d.data().department || !d.data().departmentId);
+        snapshot.docs.some(
+            (d) => !d.data().code || !d.data().department || !d.data().departmentId,
+        );
 
     if (needsSync) {
         try {
@@ -47,9 +50,18 @@ export async function listCareers(): Promise<Career[]> {
             const departmentId: string =
                 data.departmentId ?? seed?.departmentId ?? makeDepartmentId(department, campus);
             const level: AcademicLevel = data.level ?? seed?.level ?? "pregrado";
+            const code: string =
+                typeof data.code === "string" && data.code.trim()
+                    ? data.code.trim()
+                    : seed?.code ?? "";
+            const alternateCodes: string[] | undefined = Array.isArray(data.alternateCodes)
+                ? (data.alternateCodes as string[])
+                : seed?.alternateCodes;
 
             return {
                 id: d.id,
+                code,
+                ...(alternateCodes && alternateCodes.length > 0 ? { alternateCodes } : {}),
                 name: data.name ?? seed?.name ?? d.id,
                 faculty,
                 department,
@@ -75,6 +87,7 @@ export async function createCareer(input: CareerInput, order: number): Promise<v
     const departmentId = makeDepartmentId(input.department, input.campus);
     await setDoc(doc(careersRef, id), {
         ...input,
+        code: input.code.trim(),
         departmentId,
         active: true,
         order,
@@ -85,6 +98,7 @@ export async function updateCareer(id: string, input: CareerInput): Promise<void
     const departmentId = makeDepartmentId(input.department, input.campus);
     await updateDoc(doc(careersRef, id), {
         ...input,
+        code: input.code.trim(),
         departmentId,
     });
 }
@@ -93,7 +107,7 @@ export async function setCareerActive(id: string, active: boolean): Promise<void
     await updateDoc(doc(careersRef, id), { active });
 }
 
-// Creates missing programs and upgrades legacy documents with department + level.
+// Creates missing programs and upgrades legacy documents with code + department + level.
 export async function seedCareers(): Promise<number> {
     const existingDocs = new Map((await getDocs(careersRef)).docs.map((d) => [d.id, d.data()]));
     const batch = writeBatch(db);
@@ -106,13 +120,23 @@ export async function seedCareers(): Promise<number> {
         if (!current) {
             batch.set(doc(careersRef, id), { ...rest, order, active: true });
             touched += 1;
-        } else if (!current.department || !current.departmentId || !current.level) {
-            batch.update(doc(careersRef, id), {
+        } else if (
+            !current.code ||
+            !current.department ||
+            !current.departmentId ||
+            !current.level
+        ) {
+            const updatePayload: Record<string, unknown> = {
+                code: current.code ?? rest.code,
                 department: current.department ?? rest.department,
                 departmentId: current.departmentId ?? rest.departmentId,
                 level: current.level ?? rest.level,
                 order: current.order ?? order,
-            });
+            };
+            if (rest.alternateCodes && rest.alternateCodes.length > 0) {
+                updatePayload.alternateCodes = current.alternateCodes ?? rest.alternateCodes;
+            }
+            batch.update(doc(careersRef, id), updatePayload);
             touched += 1;
         }
     });

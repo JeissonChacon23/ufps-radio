@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
+    { to: "/inicio", label: "Inicio · Audiencia" },
     { to: "/events", label: "Eventos" },
     { to: "/programs", label: "Programación" },
     { to: "/podcasts", label: "Podcast" },

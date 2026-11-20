@@ -28,11 +28,11 @@ export function driveLinkError(text: string): string | null {
 }
 
 // URLs are built only here, so a change on Google's side is a one-line fix.
-// Several image URLs are tried in order because Google does not document them as an API.
-export const driveImageCandidates = (id: string, size = 512) => [
-    `https://drive.google.com/thumbnail?id=${id}&sz=w${size}`,
-    `https://lh3.googleusercontent.com/d/${id}=w${size}`,
+// High-resolution direct image endpoints are tried first before the compressed thumbnail endpoint.
+export const driveImageCandidates = (id: string, size = 1024) => [
+    `https://lh3.googleusercontent.com/d/${id}=s${size}`,
     `https://drive.google.com/uc?export=view&id=${id}`,
+    `https://drive.google.com/thumbnail?id=${id}&sz=w${size}`,
 ];
 
 export const driveImageUrl = (id: string, size = 512) => driveImageCandidates(id, size)[0];

@@ -14,7 +14,13 @@ import {
     todayIsoWeekday,
 } from "../lib/dates";
 import { normalizeText } from "../lib/text";
-import { createPodcast, deletePodcast, observePodcasts, retryPodcast } from "../services/podcastsService";
+import {
+    createPodcast,
+    deletePodcast,
+    observePodcasts,
+    retryPodcast,
+    syncAllPodcastsToQdrant,
+} from "../services/podcastsService";
 import { listPrograms } from "../services/programsService";
 import type { Podcast, PodcastStatus, Program } from "../types";
 
@@ -55,6 +61,7 @@ export default function Podcasts() {
     const [episodes, setEpisodes] = useState<Podcast[]>([]);
     const [form, setForm] = useState<EpisodeForm>(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
+    const [syncingQdrant, setSyncingQdrant] = useState(false);
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -186,6 +193,20 @@ export default function Podcasts() {
         }
     };
 
+    const handleSyncQdrant = async () => {
+        setError("");
+        setMessage("");
+        setSyncingQdrant(true);
+        try {
+            const count = await syncAllPodcastsToQdrant();
+            setMessage(`Sincronización con Qdrant completada (${count} fragmentos indexados).`);
+        } catch {
+            setError("No se pudo sincronizar con Qdrant.");
+        } finally {
+            setSyncingQdrant(false);
+        }
+    };
+
     return (
         <>
             <form className="card" onSubmit={handleSubmit}>
@@ -278,9 +299,18 @@ export default function Podcasts() {
 
             <div className="section-head">
                 <h2>Episodios publicados</h2>
-                <span className="muted">
-                    {filtered.length} {filtered.length === 1 ? "episodio" : "episodios"}
-                </span>
+                <div className="row">
+                    <span className="muted">
+                        {filtered.length} {filtered.length === 1 ? "episodio" : "episodios"}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={handleSyncQdrant}
+                        disabled={syncingQdrant}
+                    >
+                        {syncingQdrant ? "Sincronizando Qdrant…" : "Sincronizar Qdrant"}
+                    </button>
+                </div>
             </div>
 
             <div className="chips">
