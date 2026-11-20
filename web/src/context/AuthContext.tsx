@@ -23,8 +23,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return onAuthStateChanged(auth, async (firebaseUser) => {
             setUser(firebaseUser);
             if (firebaseUser) {
-                const adminDoc = await getDoc(doc(db, "admins", firebaseUser.uid));
-                setIsAdmin(adminDoc.exists());
+                try {
+                    const adminDoc = await getDoc(doc(db, "admins", firebaseUser.uid));
+                    setIsAdmin(adminDoc.exists());
+                } catch {
+                    setIsAdmin(false);
+                }
             } else {
                 setIsAdmin(false);
             }
