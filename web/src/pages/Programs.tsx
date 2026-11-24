@@ -101,6 +101,52 @@ export default function Programs() {
         window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
+    const parsedDuration = useMemo(() => {
+        const d = Math.round(Number(form.durationMinutes));
+        return Number.isFinite(d) && d >= 1 && d <= 720 ? d : 60;
+    }, [form.durationMinutes]);
+
+    /** Returns a descriptive conflict message if starting at `hhmm` overlaps any active program on the chosen days. */
+    const getConflictForStartTime = (hhmm: string): string | null => {
+        if (!hhmm || form.days.length === 0) return null;
+        const start = timeToMinutes(hhmm);
+        if (start < 0) return null;
+        const end = start + parsedDuration;
+
+        for (const other of programs) {
+            if (other.id === editingId) continue;
+            if (!other.active) continue;
+            const sharedDays = form.days.filter((d) => other.days.includes(d));
+            if (sharedDays.length === 0) continue;
+
+            const otherStart = timeToMinutes(other.startTime);
+            const otherEnd = otherStart + other.durationMinutes;
+            if (start < otherEnd && otherStart < end) {
+                const dayNames = DAYS.filter((d) => sharedDays.includes(d.value))
+                    .map((d) => d.label)
+                    .join(", ");
+                const otherEndStr = addMinutes(other.startTime, other.durationMinutes);
+                return `Se cruza el ${dayNames} con «${other.name}» (${formatTime12h(other.startTime)} – ${formatTime12h(otherEndStr)}).`;
+            }
+        }
+        return null;
+    };
+
+    const currentStartConflict = form.startTime ? getConflictForStartTime(form.startTime) : null;
+
+    const hourSlots = useMemo(() => {
+        return Array.from({ length: 24 }, (_, h) => {
+            const hhmm = `${String(h).padStart(2, "0")}:00`;
+            const conflict = getConflictForStartTime(hhmm);
+            return {
+                hhmm,
+                label: formatTime12h(hhmm),
+                conflict,
+            };
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [programs, form.days, parsedDuration, editingId]);
+
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
         setError("");
@@ -137,27 +183,11 @@ export default function Programs() {
             return;
         }
 
-        // W2: Validate schedule overlaps on shared emission days.
-        const newStart = timeToMinutes(form.startTime);
-        const newEnd = newStart + duration;
-        for (const other of programs) {
-            if (other.id === editingId) continue;
-            if (!other.active && !form.active) continue;
-            const sharedDays = form.days.filter((d) => other.days.includes(d));
-            if (sharedDays.length === 0) continue;
-
-            const otherStart = timeToMinutes(other.startTime);
-            const otherEnd = otherStart + other.durationMinutes;
-            if (newStart < otherEnd && otherStart < newEnd) {
-                const dayNames = DAYS.filter((d) => sharedDays.includes(d.value))
-                    .map((d) => d.label)
-                    .join(", ");
-                const otherEndStr = addMinutes(other.startTime, other.durationMinutes);
-                setError(
-                    `Cruce de horario: el programa se solapa el día ${dayNames} con «${other.name}» (${other.startTime} – ${otherEndStr}).`,
-                );
-                return;
-            }
+        // W2: Validate schedule overlaps on shared emission days (always block against active programs).
+        const conflict = getConflictForStartTime(form.startTime);
+        if (conflict) {
+            setError(`Cruce de horario: ${conflict}`);
+            return;
         }
 
         setSaving(true);
@@ -216,6 +246,26 @@ export default function Programs() {
     };
 
     const handleEnable = async (p: Program) => {
+        setError("");
+        const pStart = timeToMinutes(p.startTime);
+        const pEnd = pStart + p.durationMinutes;
+        for (const other of programs) {
+            if (other.id === p.id || !other.active) continue;
+            const sharedDays = p.days.filter((d) => other.days.includes(d));
+            if (sharedDays.length === 0) continue;
+            const otherStart = timeToMinutes(other.startTime);
+            const otherEnd = otherStart + other.durationMinutes;
+            if (pStart < otherEnd && otherStart < pEnd) {
+                const dayNames = DAYS.filter((d) => sharedDays.includes(d.value))
+                    .map((d) => d.label)
+                    .join(", ");
+                setError(
+                    `No se puede habilitar «${p.name}» porque su horario se cruza el ${dayNames} con «${other.name}» (${formatTime12h(other.startTime)}). Edita su horario antes de habilitarlo.`,
+                );
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                return;
+            }
+        }
         await enableProgram(p.id);
         setPrograms(await listPrograms());
     };
@@ -257,8 +307,18 @@ export default function Programs() {
                         <TimeInput
                             value={form.startTime}
                             onChange={(val) => setField("startTime", val)}
+                            isTimeDisabled={getConflictForStartTime}
+                            disabled={form.days.length === 0}
                             required
                         />
+                        {form.days.length === 0 && (
+                            <small className="muted">
+                                Selecciona primero los días de emisión para ver las horas disponibles.
+                            </small>
+                        )}
+                        {currentStartConflict && (
+                            <small className="error">Cruce de horario: {currentStartConflict}</small>
+                        )}
                     </label>
                     <label>Duración (minutos)
                         <input
@@ -274,6 +334,36 @@ export default function Programs() {
                         />
                     </label>
                 </div>
+
+                {form.days.length > 0 && (
+                    <div className="slot-picker-box">
+                        <div className="slot-picker-head">
+                            <strong>Disponibilidad de franjas horarias ({parsedDuration} min)</strong>
+                            <small className="muted">
+                                Las franjas ocupadas están inhabilitadas; toca una franja disponible para seleccionarla.
+                            </small>
+                        </div>
+                        <div className="slot-grid">
+                            {hourSlots.map((slot) => {
+                                const isSelected = form.startTime === slot.hhmm;
+                                const isBlocked = Boolean(slot.conflict);
+                                return (
+                                    <button
+                                        key={slot.hhmm}
+                                        type="button"
+                                        disabled={isBlocked}
+                                        title={slot.conflict ?? `Disponible: ${slot.label}`}
+                                        className={`slot-btn ${isSelected ? "selected" : ""} ${isBlocked ? "occupied" : ""}`}
+                                        onClick={() => setField("startTime", slot.hhmm)}
+                                    >
+                                        <span>{slot.label}</span>
+                                        <small>{isBlocked ? "Ocupada" : "Disponible"}</small>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 <div className="row">
                     <label>Colectivo
@@ -293,7 +383,7 @@ export default function Programs() {
                 {error && <p className="error">{error}</p>}
 
                 <div className="row">
-                    <button type="submit" disabled={saving}>
+                    <button type="submit" disabled={saving || Boolean(currentStartConflict)}>
                         {saving ? "Guardando…" : editingId ? "Guardar cambios" : "Publicar programa"}
                     </button>
                     {editingId && (

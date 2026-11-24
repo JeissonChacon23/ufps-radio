@@ -4,6 +4,8 @@ interface TimeInputProps {
     onChange: (value: string) => void;
     required?: boolean;
     disabled?: boolean;
+    /** Optional predicate returning a conflict reason (e.g. program name) if a candidate "HH:mm" start time is unavailable. */
+    isTimeDisabled?: (hhmm: string) => string | null;
 }
 
 const HOURS_12 = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
@@ -37,22 +39,48 @@ export default function TimeInput({
     onChange,
     required = false,
     disabled = false,
+    isTimeDisabled,
 }: TimeInputProps) {
     const { hour12, minute, period } = parse24h(value);
+    const activePeriod: "AM" | "PM" = hour12 ? period : "AM";
+
+    const findFirstAvailableMinute = (h12: string, p: "AM" | "PM"): string | null => {
+        if (!isTimeDisabled) return minute || "00";
+        const preferred = minute || "00";
+        if (!isTimeDisabled(to24h(h12, preferred, p))) return preferred;
+        for (const m of MINUTES) {
+            if (!isTimeDisabled(to24h(h12, m, p))) return m;
+        }
+        return null;
+    };
+
+    const isHourFullyBlocked = (h12: string, p: "AM" | "PM"): boolean => {
+        if (!isTimeDisabled) return false;
+        return MINUTES.every((m) => Boolean(isTimeDisabled(to24h(h12, m, p))));
+    };
+
+    const isPeriodFullyBlocked = (p: "AM" | "PM"): boolean => {
+        if (!isTimeDisabled) return false;
+        return HOURS_12.every((h) => isHourFullyBlocked(h, p));
+    };
 
     const handleHourChange = (newHour12: string) => {
         if (!newHour12) {
             onChange("");
             return;
         }
-        // Auto-complete minutes and default period when picking an hour for the first time
-        const nextMinute = minute || "00";
         const defaultPeriod: "AM" | "PM" = value
             ? period
             : Number(newHour12) >= 6 && Number(newHour12) <= 11
               ? "AM"
               : "PM";
-        onChange(to24h(newHour12, nextMinute, defaultPeriod));
+        const chosenPeriod = isHourFullyBlocked(newHour12, defaultPeriod)
+            ? defaultPeriod === "AM"
+                ? "PM"
+                : "AM"
+            : defaultPeriod;
+        const nextMinute = findFirstAvailableMinute(newHour12, chosenPeriod) ?? (minute || "00");
+        onChange(to24h(newHour12, nextMinute, chosenPeriod));
     };
 
     const handleMinuteChange = (newMinute: string) => {
@@ -67,8 +95,24 @@ export default function TimeInput({
 
     const handlePeriodChange = (newPeriod: "AM" | "PM") => {
         const effectiveHour = hour12 || "08";
-        const effectiveMinute = minute || "00";
-        onChange(to24h(effectiveHour, effectiveMinute, newPeriod));
+        if (!isTimeDisabled) {
+            onChange(to24h(effectiveHour, minute || "00", newPeriod));
+            return;
+        }
+        const availMin = findFirstAvailableMinute(effectiveHour, newPeriod);
+        if (availMin !== null) {
+            onChange(to24h(effectiveHour, availMin, newPeriod));
+            return;
+        }
+        // If current hour is blocked in the new period, jump to the first available hour in that period
+        for (const h of HOURS_12) {
+            const m = findFirstAvailableMinute(h, newPeriod);
+            if (m !== null) {
+                onChange(to24h(h, m, newPeriod));
+                return;
+            }
+        }
+        onChange(to24h(effectiveHour, minute || "00", newPeriod));
     };
 
     return (
@@ -81,9 +125,14 @@ export default function TimeInput({
                 disabled={disabled}
             >
                 <option value="">Hora</option>
-                {HOURS_12.map((h) => (
-                    <option key={h} value={h}>{h}</option>
-                ))}
+                {HOURS_12.map((h) => {
+                    const blocked = isHourFullyBlocked(h, activePeriod);
+                    return (
+                        <option key={h} value={h} disabled={blocked}>
+                            {blocked ? `${h} (ocupada)` : h}
+                        </option>
+                    );
+                })}
             </select>
             <span className="time-sep">:</span>
             <select
@@ -94,18 +143,24 @@ export default function TimeInput({
                 disabled={disabled}
             >
                 <option value="">Min</option>
-                {MINUTES.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                ))}
+                {MINUTES.map((m) => {
+                    const candidate = hour12 ? to24h(hour12, m, activePeriod) : "";
+                    const reason = candidate && isTimeDisabled ? isTimeDisabled(candidate) : null;
+                    return (
+                        <option key={m} value={m} disabled={Boolean(reason)}>
+                            {reason ? `${m} (ocupado)` : m}
+                        </option>
+                    );
+                })}
             </select>
             <select
                 aria-label="Periodo AM o PM"
-                value={hour12 ? period : "AM"}
+                value={activePeriod}
                 onChange={(e) => handlePeriodChange(e.target.value as "AM" | "PM")}
                 disabled={disabled}
             >
-                <option value="AM">a. m.</option>
-                <option value="PM">p. m.</option>
+                <option value="AM" disabled={isPeriodFullyBlocked("AM")}>a. m.</option>
+                <option value="PM" disabled={isPeriodFullyBlocked("PM")}>p. m.</option>
             </select>
             {!required && value && !disabled && (
                 <button
