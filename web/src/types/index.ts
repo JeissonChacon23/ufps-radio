@@ -10,9 +10,15 @@ export interface RadioEvent {
     endDate: Date | null;
     startTime: string; // "HH:mm"
     endTime: string; // "HH:mm" or ""
+    active: boolean; // false when soft-disabled (never hard-deleted)
+    disableReason: string; // observation recorded when disabling
+    disabledAt: Date | null;
 }
 
-export type EventInput = Omit<RadioEvent, "id">;
+export type EventInput = Omit<RadioEvent, "id" | "active" | "disableReason" | "disabledAt"> & {
+    active?: boolean;
+    disableReason?: string;
+};
 
 export interface Program {
     id: string;
@@ -24,9 +30,13 @@ export interface Program {
     hosts: string[];
     active: boolean;
     artworkDriveId: string; // Google Drive file ID of the 1024x1024 image
+    disableReason: string; // observation recorded when disabling
+    disabledAt: Date | null;
 }
 
-export type ProgramInput = Omit<Program, "id">;
+export type ProgramInput = Omit<Program, "id" | "disableReason" | "disabledAt"> & {
+    disableReason?: string;
+};
 
 export type PodcastStatus = "pendiente" | "en_proceso" | "lista" | "error";
 

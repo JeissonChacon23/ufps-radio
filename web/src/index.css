@@ -562,3 +562,13 @@ audio { width: 100%; }
     font-size: 12px;
 }
 
+
+.note-box {
+    background: #fff5f5;
+    border: 1px solid #fecaca;
+    border-left: 4px solid var(--ufps-red, #d91023);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #7f1d1d;
+}

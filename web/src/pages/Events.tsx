@@ -13,7 +13,7 @@ import {
 } from "../lib/dates";
 import { groupByFacultyAndDepartment, type DepartmentGroup } from "../lib/careers";
 import { normalizeText } from "../lib/text";
-import { createEvent, deleteEvent, listEvents, updateEvent } from "../services/eventsService";
+import { createEvent, disableEvent, enableEvent, listEvents, updateEvent } from "../services/eventsService";
 import { listCareers } from "../services/careersService";
 import type { Career, RadioEvent } from "../types";
 
@@ -43,6 +43,8 @@ const EMPTY_FORM: EventForm = {
 
 const PROFILE_IDS = new Set(PROFILE_AUDIENCES.map((o) => o.id));
 
+type EventStatusFilter = "all" | "active" | "disabled";
+
 export default function Events() {
     const [events, setEvents] = useState<RadioEvent[]>([]);
     const [careers, setCareers] = useState<Career[]>([]);
@@ -52,7 +54,12 @@ export default function Events() {
     const [error, setError] = useState("");
     const [month, setMonth] = useState(() => startOfMonth(new Date()));
     const [search, setSearch] = useState("");
+    const [statusFilter, setStatusFilter] = useState<EventStatusFilter>("all");
     const [showAll, setShowAll] = useState(false);
+    const [disablingEvent, setDisablingEvent] = useState<RadioEvent | null>(null);
+    const [disableReason, setDisableReason] = useState("");
+    const [disableError, setDisableError] = useState("");
+    const [disabling, setDisabling] = useState(false);
 
     useEffect(() => {
         listEvents().then(setEvents);
@@ -98,15 +105,20 @@ export default function Events() {
         const term = normalizeText(search.trim());
         const list = events.filter((ev) => {
             const inRange = showAll || overlapsMonth(ev.date, ev.endDate, month);
+            const statusOk =
+                statusFilter === "all" ||
+                (statusFilter === "active" ? ev.active : !ev.active);
             const matches =
                 term === "" ||
-                normalizeText(`${ev.title} ${ev.description} ${ev.specialGuest}`).includes(term);
-            return inRange && matches;
+                normalizeText(
+                    `${ev.title} ${ev.description} ${ev.specialGuest} ${ev.disableReason}`,
+                ).includes(term);
+            return inRange && statusOk && matches;
         });
         return list.sort((a, b) =>
             showAll ? b.date.getTime() - a.date.getTime() : a.date.getTime() - b.date.getTime(),
         );
-    }, [events, month, search, showAll]);
+    }, [events, month, search, statusFilter, showAll]);
 
     const setField = <K extends keyof EventForm>(key: K, value: EventForm[K]) =>
         setForm((prev) => ({ ...prev, [key]: value }));
@@ -248,10 +260,37 @@ export default function Events() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("¿Eliminar este evento?")) return;
-        await deleteEvent(id);
-        if (editingId === id) resetForm();
+    const openDisableModal = (ev: RadioEvent) => {
+        setDisablingEvent(ev);
+        setDisableReason(ev.disableReason || "");
+        setDisableError("");
+    };
+
+    const handleConfirmDisable = async (e: FormEvent) => {
+        e.preventDefault();
+        if (!disablingEvent) return;
+        const cleanReason = disableReason.trim();
+        if (!cleanReason) {
+            setDisableError("Escribe una observación o motivo para deshabilitar el evento.");
+            return;
+        }
+        setDisabling(true);
+        setDisableError("");
+        try {
+            await disableEvent(disablingEvent.id, cleanReason);
+            if (editingId === disablingEvent.id) resetForm();
+            setDisablingEvent(null);
+            setDisableReason("");
+            setEvents(await listEvents());
+        } catch {
+            setDisableError("No se pudo deshabilitar el evento.");
+        } finally {
+            setDisabling(false);
+        }
+    };
+
+    const handleEnable = async (ev: RadioEvent) => {
+        await enableEvent(ev.id);
         setEvents(await listEvents());
     };
 
@@ -444,10 +483,18 @@ export default function Events() {
                 <input
                     className="search"
                     type="search"
-                    placeholder="Buscar por título, invitado o descripción"
+                    placeholder="Buscar por título, invitado, descripción u observación"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
+                <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as EventStatusFilter)}
+                >
+                    <option value="all">Todos</option>
+                    <option value="active">Activos</option>
+                    <option value="disabled">Deshabilitados</option>
+                </select>
                 <label className="check">
                     <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
                     Ver todos los meses
@@ -461,8 +508,11 @@ export default function Events() {
             )}
 
             {filteredEvents.map((ev) => (
-                <div className="card" key={ev.id}>
-                    <strong>{ev.title}</strong>
+                <div className="card" key={ev.id} style={ev.active ? undefined : { opacity: 0.85 }}>
+                    <div className="row" style={{ alignItems: "center" }}>
+                        <strong>{ev.title}</strong>
+                        {!ev.active && <span className="tag off">Deshabilitado · No visible en la app</span>}
+                    </div>
                     <div className="muted">
                         {formatDate(ev.date)}
                         {ev.startTime && ` · ${formatTime12h(ev.startTime)}`}
@@ -485,13 +535,82 @@ export default function Events() {
                         ))}
                     </div>
                     <p>{ev.description}</p>
+                    {!ev.active && ev.disableReason && (
+                        <div className="note-box">
+                            <strong>Observación de deshabilitación:</strong> {ev.disableReason}
+                        </div>
+                    )}
                     <div className="row">
                         {ev.link && <a href={ev.link} target="_blank" rel="noreferrer">Ver fuente</a>}
                         <button onClick={() => startEdit(ev)}>Editar</button>
-                        <button className="danger" onClick={() => handleDelete(ev.id)}>Eliminar</button>
+                        {ev.active ? (
+                            <button className="danger" onClick={() => openDisableModal(ev)}>
+                                Deshabilitar
+                            </button>
+                        ) : (
+                            <button className="secondary" onClick={() => handleEnable(ev)}>
+                                Habilitar nuevamente
+                            </button>
+                        )}
                     </div>
                 </div>
             ))}
+
+            {disablingEvent && (
+                <div
+                    className="modal-backdrop"
+                    onClick={() => !disabling && setDisablingEvent(null)}
+                >
+                    <form
+                        className="card modal-card"
+                        onClick={(e) => e.stopPropagation()}
+                        onSubmit={handleConfirmDisable}
+                    >
+                        <div className="section-head">
+                            <h2 style={{ margin: 0 }}>Deshabilitar evento</h2>
+                            <button
+                                type="button"
+                                className="ghost btn-sm"
+                                onClick={() => setDisablingEvent(null)}
+                                disabled={disabling}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="muted" style={{ margin: 0 }}>
+                            El evento <strong>«{disablingEvent.title}»</strong> no se eliminará de la base de datos, pero dejará de ser visible para todos los usuarios en la app móvil.
+                        </p>
+
+                        <label>
+                            Observación / motivo de deshabilitación
+                            <textarea
+                                value={disableReason}
+                                onChange={(e) => setDisableReason(e.target.value)}
+                                rows={3}
+                                placeholder="Ej. Evento aplazado por la facultad, cambio de fecha, cancelado por el organizador…"
+                                required
+                            />
+                        </label>
+
+                        {disableError && <p className="error">{disableError}</p>}
+
+                        <div className="row" style={{ justifyContent: "flex-end" }}>
+                            <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => setDisablingEvent(null)}
+                                disabled={disabling}
+                            >
+                                Cancelar
+                            </button>
+                            <button type="submit" className="danger" disabled={disabling}>
+                                {disabling ? "Deshabilitando…" : "Confirmar deshabilitación"}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
         </>
     );
 }

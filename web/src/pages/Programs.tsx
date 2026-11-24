@@ -13,7 +13,7 @@ import {
 } from "../lib/dates";
 import { driveViewUrl, extractDriveId } from "../lib/drive";
 import { normalizeText } from "../lib/text";
-import { createProgram, deleteProgram, listPrograms, updateProgram } from "../services/programsService";
+import { createProgram, disableProgram, enableProgram, listPrograms, updateProgram } from "../services/programsService";
 import type { Program } from "../types";
 
 interface ProgramForm {
@@ -49,6 +49,10 @@ export default function Programs() {
     const [dayFilter, setDayFilter] = useState<number | "all">("all");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
     const [search, setSearch] = useState("");
+    const [disablingProgram, setDisablingProgram] = useState<Program | null>(null);
+    const [disableReason, setDisableReason] = useState("");
+    const [disableError, setDisableError] = useState("");
+    const [disabling, setDisabling] = useState(false);
 
     useEffect(() => {
         listPrograms().then(setPrograms);
@@ -60,7 +64,8 @@ export default function Programs() {
             const dayOk = dayFilter === "all" || p.days.includes(dayFilter);
             const statusOk = statusFilter === "all" || p.active === (statusFilter === "active");
             const textOk =
-                term === "" || normalizeText([p.name, p.collective, ...p.hosts].join(" ")).includes(term);
+                term === "" ||
+                normalizeText([p.name, p.collective, p.disableReason, ...p.hosts].join(" ")).includes(term);
             return dayOk && statusOk && textOk;
         });
     }, [programs, dayFilter, statusFilter, search]);
@@ -181,10 +186,37 @@ export default function Programs() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("¿Eliminar este programa?")) return;
-        await deleteProgram(id);
-        if (editingId === id) resetForm();
+    const openDisableModal = (p: Program) => {
+        setDisablingProgram(p);
+        setDisableReason(p.disableReason || "");
+        setDisableError("");
+    };
+
+    const handleConfirmDisable = async (e: FormEvent) => {
+        e.preventDefault();
+        if (!disablingProgram) return;
+        const cleanReason = disableReason.trim();
+        if (!cleanReason) {
+            setDisableError("Escribe una observación o motivo para deshabilitar el programa.");
+            return;
+        }
+        setDisabling(true);
+        setDisableError("");
+        try {
+            await disableProgram(disablingProgram.id, cleanReason);
+            if (editingId === disablingProgram.id) resetForm();
+            setDisablingProgram(null);
+            setDisableReason("");
+            setPrograms(await listPrograms());
+        } catch {
+            setDisableError("No se pudo deshabilitar el programa.");
+        } finally {
+            setDisabling(false);
+        }
+    };
+
+    const handleEnable = async (p: Program) => {
+        await enableProgram(p.id);
         setPrograms(await listPrograms());
     };
 
@@ -310,7 +342,7 @@ export default function Programs() {
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
                     <option value="all">Todos</option>
                     <option value="active">Activos</option>
-                    <option value="inactive">Inactivos</option>
+                    <option value="inactive">Deshabilitados</option>
                 </select>
             </div>
 
@@ -323,14 +355,18 @@ export default function Programs() {
             {filteredPrograms.map((p) => {
                 const endStr = addMinutes(p.startTime, p.durationMinutes);
                 return (
-                    <div className="card media-card" key={p.id}>
+                    <div
+                        className="card media-card"
+                        key={p.id}
+                        style={p.active ? undefined : { opacity: 0.85 }}
+                    >
                         {p.artworkDriveId
                             ? <DriveImage id={p.artworkDriveId} size={160} />
                             : <div className="thumb placeholder" />}
                         <div className="media-body">
                             <div className="row">
                                 <strong>{p.name}</strong>
-                                {!p.active && <span className="tag off">Inactivo</span>}
+                                {!p.active && <span className="tag off">Deshabilitado · No visible en la app</span>}
                             </div>
                             <div className="muted">
                                 <strong>{formatTime12h(p.startTime)} – {formatTime12h(endStr)}</strong>{" "}
@@ -348,14 +384,83 @@ export default function Programs() {
                             </div>
                             {p.collective && <div>Colectivo: {p.collective}</div>}
                             <div>Locutores: {p.hosts.join(", ") || "—"}</div>
+                            {!p.active && p.disableReason && (
+                                <div className="note-box">
+                                    <strong>Observación de deshabilitación:</strong> {p.disableReason}
+                                </div>
+                            )}
                             <div className="row">
                                 <button onClick={() => startEdit(p)}>Editar</button>
-                                <button className="danger" onClick={() => handleDelete(p.id)}>Eliminar</button>
+                                {p.active ? (
+                                    <button className="danger" onClick={() => openDisableModal(p)}>
+                                        Deshabilitar
+                                    </button>
+                                ) : (
+                                    <button className="secondary" onClick={() => handleEnable(p)}>
+                                        Habilitar nuevamente
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </div>
                 );
             })}
+
+            {disablingProgram && (
+                <div
+                    className="modal-backdrop"
+                    onClick={() => !disabling && setDisablingProgram(null)}
+                >
+                    <form
+                        className="card modal-card"
+                        onClick={(e) => e.stopPropagation()}
+                        onSubmit={handleConfirmDisable}
+                    >
+                        <div className="section-head">
+                            <h2 style={{ margin: 0 }}>Deshabilitar programa</h2>
+                            <button
+                                type="button"
+                                className="ghost btn-sm"
+                                onClick={() => setDisablingProgram(null)}
+                                disabled={disabling}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="muted" style={{ margin: 0 }}>
+                            El programa <strong>«{disablingProgram.name}»</strong> no se eliminará de la base de datos, pero dejará de ser visible en la programación y búsqueda de la app móvil.
+                        </p>
+
+                        <label>
+                            Observación / motivo de deshabilitación
+                            <textarea
+                                value={disableReason}
+                                onChange={(e) => setDisableReason(e.target.value)}
+                                rows={3}
+                                placeholder="Ej. Programa en receso semestral, cambio de temporada, fuera de parrilla…"
+                                required
+                            />
+                        </label>
+
+                        {disableError && <p className="error">{disableError}</p>}
+
+                        <div className="row" style={{ justifyContent: "flex-end" }}>
+                            <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => setDisablingProgram(null)}
+                                disabled={disabling}
+                            >
+                                Cancelar
+                            </button>
+                            <button type="submit" className="danger" disabled={disabling}>
+                                {disabling ? "Deshabilitando…" : "Confirmar deshabilitación"}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
         </>
     );
 }
