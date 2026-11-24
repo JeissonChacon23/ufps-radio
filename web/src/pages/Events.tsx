@@ -68,6 +68,46 @@ export default function Events() {
 
     const today = toDateInput(new Date());
 
+    /** Returns a conflict reason if the given "HH:mm" on `form.date` overlaps an existing active event or is in the past. */
+    const getEventStartTimeConflict = (hhmm: string): string | null => {
+        if (!form.date || !hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
+
+        const candidateStart = fromDateInput(form.date, hhmm);
+        const nowFloor = new Date();
+        nowFloor.setSeconds(0, 0);
+        if (candidateStart < nowFloor) {
+            return "Hora pasada";
+        }
+
+        const candidateEnd = new Date(candidateStart.getTime() + 60 * 60 * 1000);
+        for (const ev of events) {
+            if (ev.id === editingId || !ev.active) continue;
+            const evStart = ev.date;
+            const evEnd = ev.endDate ?? new Date(evStart.getTime() + 60 * 60 * 1000);
+            if (candidateStart < evEnd && evStart < candidateEnd) {
+                return `Ocupada por «${ev.title}» (${formatTime12h(ev.startTime)})`;
+            }
+        }
+        return null;
+    };
+
+    const currentEventStartConflict =
+        form.date && form.startTime ? getEventStartTimeConflict(form.startTime) : null;
+
+    const eventHourSlots = useMemo(() => {
+        if (!form.date) return [];
+        return Array.from({ length: 24 }, (_, h) => {
+            const hhmm = `${String(h).padStart(2, "0")}:00`;
+            const conflict = getEventStartTimeConflict(hhmm);
+            return {
+                hhmm,
+                label: formatTime12h(hhmm),
+                conflict,
+            };
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [events, form.date, editingId]);
+
     const audienceLabel = (id: string) => {
         const profile = PROFILE_AUDIENCES.find((o) => o.id === id);
         if (profile) return profile.label;
@@ -326,10 +366,51 @@ export default function Events() {
                         <TimeInput
                             value={form.startTime}
                             onChange={(val) => setField("startTime", val)}
+                            isTimeDisabled={getEventStartTimeConflict}
+                            disabled={!form.date}
                             required
                         />
+                        {!form.date && (
+                            <small className="muted">
+                                Selecciona primero la fecha de inicio para ver las horas disponibles.
+                            </small>
+                        )}
+                        {currentEventStartConflict && (
+                            <small className="error">No disponible: {currentEventStartConflict}</small>
+                        )}
                     </label>
                 </div>
+
+                {form.date && (
+                    <div className="slot-picker-box">
+                        <div className="slot-picker-head">
+                            <strong>Disponibilidad de horarios para el {form.date}</strong>
+                            <small className="muted">
+                                Las horas pasadas u ocupadas por otros eventos aparecen inhabilitadas; toca una disponible para seleccionarla.
+                            </small>
+                        </div>
+                        <div className="slot-grid">
+                            {eventHourSlots.map((slot) => {
+                                const isSelected = form.startTime === slot.hhmm;
+                                const isBlocked = Boolean(slot.conflict);
+                                const shortStatus = slot.conflict === "Hora pasada" ? "Pasada" : isBlocked ? "Ocupada" : "Disponible";
+                                return (
+                                    <button
+                                        key={slot.hhmm}
+                                        type="button"
+                                        disabled={isBlocked}
+                                        title={slot.conflict ?? `Disponible: ${slot.label}`}
+                                        className={`slot-btn ${isSelected ? "selected" : ""} ${isBlocked ? "occupied" : ""}`}
+                                        onClick={() => setField("startTime", slot.hhmm)}
+                                    >
+                                        <span>{slot.label}</span>
+                                        <small>{shortStatus}</small>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 <div className="row">
                     <label>Fecha final (opcional)

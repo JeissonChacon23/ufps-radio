@@ -106,12 +106,19 @@ export default function Programs() {
         return Number.isFinite(d) && d >= 1 && d <= 720 ? d : 60;
     }, [form.durationMinutes]);
 
-    /** Returns a descriptive conflict message if starting at `hhmm` overlaps any active program on the chosen days. */
+    /** Returns a descriptive conflict message if starting at `hhmm` overlaps any active program on the chosen days or is in the past for today. */
     const getConflictForStartTime = (hhmm: string): string | null => {
         if (!hhmm || form.days.length === 0) return null;
         const start = timeToMinutes(hhmm);
         if (start < 0) return null;
         const end = start + parsedDuration;
+
+        // Also block past times when today's weekday is included
+        const todayIso = todayIsoWeekday();
+        const nowTime = currentTimeString();
+        if (form.days.includes(todayIso) && hhmm < nowTime) {
+            return `Hora pasada (hoy después de ${formatTime12h(nowTime)})`;
+        }
 
         for (const other of programs) {
             if (other.id === editingId) continue;
@@ -347,6 +354,11 @@ export default function Programs() {
                             {hourSlots.map((slot) => {
                                 const isSelected = form.startTime === slot.hhmm;
                                 const isBlocked = Boolean(slot.conflict);
+                                const shortStatus = slot.conflict?.startsWith("Hora pasada")
+                                    ? "Pasada"
+                                    : isBlocked
+                                      ? "Ocupada"
+                                      : "Disponible";
                                 return (
                                     <button
                                         key={slot.hhmm}
@@ -357,7 +369,7 @@ export default function Programs() {
                                         onClick={() => setField("startTime", slot.hhmm)}
                                     >
                                         <span>{slot.label}</span>
-                                        <small>{isBlocked ? "Ocupada" : "Disponible"}</small>
+                                        <small>{shortStatus}</small>
                                     </button>
                                 );
                             })}
