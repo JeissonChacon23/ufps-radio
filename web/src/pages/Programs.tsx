@@ -106,12 +106,56 @@ export default function Programs() {
         return Number.isFinite(d) && d >= 1 && d <= 720 ? d : 60;
     }, [form.durationMinutes]);
 
-    /** Returns a descriptive conflict message if starting at `hhmm` overlaps any active program on the chosen days or is in the past for today. */
-    const getConflictForStartTime = (hhmm: string): string | null => {
+    /** Finds the earliest active program starting after `startMin` on any of the selected days. */
+    const getNextProgramLimit = (
+        hhmm: string,
+    ): { maxDuration: number; nextProgram: Program | null; limitTime: string } => {
+        const fallbackMax = 720;
+        if (!hhmm || form.days.length === 0) {
+            return { maxDuration: fallbackMax, nextProgram: null, limitTime: "" };
+        }
+        const start = timeToMinutes(hhmm);
+        if (start < 0) return { maxDuration: fallbackMax, nextProgram: null, limitTime: "" };
+
+        let bestGap = Math.min(fallbackMax, 1440 - start);
+        let nextProgram: Program | null = null;
+        let limitTime = "24:00";
+
+        for (const other of programs) {
+            if (other.id === editingId || !other.active) continue;
+            const sharedDays = form.days.filter((d) => other.days.includes(d));
+            if (sharedDays.length === 0) continue;
+
+            const otherStart = timeToMinutes(other.startTime);
+            if (otherStart >= start) {
+                const gap = otherStart - start;
+                if (gap < bestGap) {
+                    bestGap = gap;
+                    nextProgram = other;
+                    limitTime = other.startTime;
+                }
+            }
+        }
+
+        return {
+            maxDuration: Math.max(0, bestGap),
+            nextProgram,
+            limitTime,
+        };
+    };
+
+    const durationLimit = useMemo(
+        () => getNextProgramLimit(form.startTime),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [programs, form.days, form.startTime, editingId],
+    );
+
+    /** Returns a descriptive conflict message if starting at `hhmm` (with optional duration) overlaps any active program on the chosen days or is in the past for today. */
+    const getConflictForStartTime = (hhmm: string, checkDuration?: number): string | null => {
         if (!hhmm || form.days.length === 0) return null;
         const start = timeToMinutes(hhmm);
         if (start < 0) return null;
-        const end = start + parsedDuration;
+        const end = start + (checkDuration ?? parsedDuration);
 
         // Also block past times when today's weekday is included
         const todayIso = todayIsoWeekday();
@@ -139,20 +183,43 @@ export default function Programs() {
         return null;
     };
 
+    /** Selecting a start time automatically caps duration to the gap before the next program so it never overlaps. */
+    const selectStartTime = (hhmm: string) => {
+        setForm((prev) => {
+            if (!hhmm) return { ...prev, startTime: "" };
+            const limit = getNextProgramLimit(hhmm);
+            const currDur = Math.round(Number(prev.durationMinutes)) || 60;
+            const cappedDur =
+                limit.maxDuration > 0 && currDur > limit.maxDuration
+                    ? String(limit.maxDuration)
+                    : prev.durationMinutes;
+            return {
+                ...prev,
+                startTime: hhmm,
+                durationMinutes: cappedDur,
+            };
+        });
+    };
+
     const currentStartConflict = form.startTime ? getConflictForStartTime(form.startTime) : null;
 
     const hourSlots = useMemo(() => {
         return Array.from({ length: 24 }, (_, h) => {
             const hhmm = `${String(h).padStart(2, "0")}:00`;
-            const conflict = getConflictForStartTime(hhmm);
+            // A slot is blocked only if that exact starting minute is already occupied or in the past
+            const startConflict = getConflictForStartTime(hhmm, 1);
+            const limit = getNextProgramLimit(hhmm);
             return {
                 hhmm,
                 label: formatTime12h(hhmm),
-                conflict,
+                conflict: startConflict,
+                maxDuration: limit.maxDuration,
+                limitTime: limit.limitTime,
+                nextProgramName: limit.nextProgram?.name ?? null,
             };
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [programs, form.days, parsedDuration, editingId]);
+    }, [programs, form.days, editingId]);
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
@@ -168,8 +235,13 @@ export default function Programs() {
         }
 
         const duration = Math.round(Number(form.durationMinutes));
-        if (!Number.isFinite(duration) || duration < 1 || duration > 720) {
-            setError("Ingresa una duración válida entre 1 y 720 minutos.");
+        const maxAllowed = durationLimit.maxDuration > 0 ? durationLimit.maxDuration : 720;
+        if (!Number.isFinite(duration) || duration < 1 || duration > maxAllowed) {
+            setError(
+                durationLimit.nextProgram
+                    ? `La duración máxima permitida desde las ${formatTime12h(form.startTime)} es de ${maxAllowed} min (hasta las ${formatTime12h(durationLimit.limitTime)}, cuando inicia «${durationLimit.nextProgram.name}»).`
+                    : `Ingresa una duración válida entre 1 y ${maxAllowed} minutos.`,
+            );
             return;
         }
 
@@ -313,8 +385,8 @@ export default function Programs() {
                     <label>Hora de inicio
                         <TimeInput
                             value={form.startTime}
-                            onChange={(val) => setField("startTime", val)}
-                            isTimeDisabled={getConflictForStartTime}
+                            onChange={selectStartTime}
+                            isTimeDisabled={(hhmm) => getConflictForStartTime(hhmm, 1)}
                             disabled={form.days.length === 0}
                             required
                         />
@@ -327,27 +399,44 @@ export default function Programs() {
                             <small className="error">Cruce de horario: {currentStartConflict}</small>
                         )}
                     </label>
-                    <label>Duración (minutos)
+                    <label>Duración (minutos{form.startTime && durationLimit.maxDuration > 0 ? ` · máx. ${durationLimit.maxDuration}` : ""})
                         <input
                             type="number"
                             inputMode="numeric"
                             min={1}
-                            max={720}
+                            max={durationLimit.maxDuration > 0 ? durationLimit.maxDuration : 720}
                             step={1}
                             value={form.durationMinutes}
-                            onChange={(e) => setField("durationMinutes", e.target.value)}
+                            onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === "") {
+                                    setField("durationMinutes", "");
+                                    return;
+                                }
+                                const n = Math.round(Number(raw));
+                                if (!Number.isFinite(n)) return;
+                                const cap = durationLimit.maxDuration > 0 ? durationLimit.maxDuration : 720;
+                                setField("durationMinutes", String(Math.min(Math.max(n, 0), cap)));
+                            }}
                             placeholder="Ej. 20, 60"
                             required
                         />
+                        {form.startTime && durationLimit.maxDuration > 0 && (
+                            <small className="muted">
+                                {durationLimit.nextProgram
+                                    ? `Límite: máx. ${durationLimit.maxDuration} min — hasta las ${formatTime12h(durationLimit.limitTime)} (inicio de «${durationLimit.nextProgram.name}»).`
+                                    : `Termina a las ${formatTime12h(addMinutes(form.startTime, Math.min(parsedDuration, durationLimit.maxDuration)))} (máx. ${durationLimit.maxDuration} min).`}
+                            </small>
+                        )}
                     </label>
                 </div>
 
                 {form.days.length > 0 && (
                     <div className="slot-picker-box">
                         <div className="slot-picker-head">
-                            <strong>Disponibilidad de franjas horarias ({parsedDuration} min)</strong>
+                            <strong>Disponibilidad de franjas horarias</strong>
                             <small className="muted">
-                                Las franjas ocupadas están inhabilitadas; toca una franja disponible para seleccionarla.
+                                Las franjas ocupadas están inhabilitadas; al elegir una hora disponible, la duración máxima se limita automáticamente hasta el inicio del siguiente programa.
                             </small>
                         </div>
                         <div className="slot-grid">
@@ -358,15 +447,22 @@ export default function Programs() {
                                     ? "Pasada"
                                     : isBlocked
                                       ? "Ocupada"
-                                      : "Disponible";
+                                      : slot.nextProgramName
+                                        ? `Hasta ${formatTime12h(slot.limitTime)}`
+                                        : "Disponible";
                                 return (
                                     <button
                                         key={slot.hhmm}
                                         type="button"
                                         disabled={isBlocked}
-                                        title={slot.conflict ?? `Disponible: ${slot.label}`}
+                                        title={
+                                            slot.conflict ??
+                                            (slot.nextProgramName
+                                                ? `Disponible desde ${slot.label} hasta ${formatTime12h(slot.limitTime)} (máx. ${slot.maxDuration} min antes de «${slot.nextProgramName}»)`
+                                                : `Disponible desde ${slot.label}`)
+                                        }
                                         className={`slot-btn ${isSelected ? "selected" : ""} ${isBlocked ? "occupied" : ""}`}
-                                        onClick={() => setField("startTime", slot.hhmm)}
+                                        onClick={() => selectStartTime(slot.hhmm)}
                                     >
                                         <span>{slot.label}</span>
                                         <small>{shortStatus}</small>
