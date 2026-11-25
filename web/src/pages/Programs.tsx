@@ -512,24 +512,43 @@ export default function Programs() {
         }
     };
 
-    /** Groups filtered programs by their starting hour (0..23) so the left column shows hours vertically. */
+    /**
+     * Groups filtered programs across ALL hours they occupy (e.g. a 2:00–4:00 PM program
+     * appears at 2:00 PM as start and at 3:00 PM as continuation so the hour never looks empty).
+     */
     const timelineRows = useMemo(() => {
-        const byHour = new Map<number, Program[]>();
+        interface TimelineEntry {
+            program: Program;
+            isContinuation: boolean;
+        }
+        const byHour = new Map<number, TimelineEntry[]>();
+
         for (const p of filteredPrograms) {
             const startMin = timeToMinutes(p.startTime);
-            const hour = startMin >= 0 ? Math.floor(startMin / 60) % 24 : 0;
-            const list = byHour.get(hour) ?? [];
-            list.push(p);
-            byHour.set(hour, list);
+            if (startMin < 0) continue;
+            const endMin = startMin + Math.max(p.durationMinutes, 1);
+            const firstHour = Math.floor(startMin / 60);
+            const lastHour = Math.min(23, Math.floor((endMin - 1) / 60));
+
+            for (let h = firstHour; h <= lastHour; h++) {
+                const hourKey = h % 24;
+                const list = byHour.get(hourKey) ?? [];
+                list.push({ program: p, isContinuation: h > firstHour });
+                byHour.set(hourKey, list);
+            }
         }
+
         for (const list of byHour.values()) {
             list.sort((a, b) => {
-                if (a.active !== b.active) return a.active ? -1 : 1;
-                return a.startTime.localeCompare(b.startTime) || a.name.localeCompare(b.name);
+                if (a.program.active !== b.program.active) return a.program.active ? -1 : 1;
+                if (a.isContinuation !== b.isContinuation) return a.isContinuation ? 1 : -1;
+                return (
+                    a.program.startTime.localeCompare(b.program.startTime) ||
+                    a.program.name.localeCompare(b.program.name)
+                );
             });
         }
 
-        // Show all 24 hours when browsing normally, or only matching hours when searching
         const hoursToShow =
             search.trim() !== ""
                 ? SCHEDULE_HOURS.filter((h) => (byHour.get(h)?.length ?? 0) > 0)
@@ -541,7 +560,7 @@ export default function Programs() {
                 hour: h,
                 hhmm,
                 label: formatTime12h(hhmm),
-                programs: byHour.get(h) ?? [],
+                entries: byHour.get(h) ?? [],
             };
         });
     }, [filteredPrograms, search]);
@@ -748,25 +767,32 @@ export default function Programs() {
                         {timelineRows.map((row) => (
                             <div
                                 key={row.hour}
-                                className={`timeline-row ${row.programs.length === 0 ? "timeline-row-empty" : ""}`}
+                                className={`timeline-row ${row.entries.length === 0 ? "timeline-row-empty" : ""}`}
                             >
                                 <div className="timeline-hour">{row.label}</div>
                                 <div className="timeline-programs">
-                                    {row.programs.length === 0 ? (
-                                        <span className="timeline-free-label">Sin programa asignado</span>
+                                    {row.entries.length === 0 ? (
+                                        <span className="timeline-free-label">Disponible</span>
                                     ) : (
-                                        row.programs.map((p) => {
+                                        row.entries.map(({ program: p, isContinuation }) => {
                                             const endStr = addMinutes(p.startTime, p.durationMinutes);
                                             const dayShorts = DAYS.filter((d) => p.days.includes(d.value))
                                                 .map((d) => d.short)
                                                 .join(" · ");
                                             return (
                                                 <div
-                                                    key={p.id}
-                                                    className={`timeline-program-line ${p.active ? "" : "is-disabled"}`}
+                                                    key={`${p.id}-${row.hour}`}
+                                                    className={`timeline-program-line ${p.active ? "" : "is-disabled"} ${isContinuation ? "is-continuation" : ""}`}
                                                 >
                                                     <div className="timeline-program-info">
-                                                        <strong className="timeline-program-name">{p.name}</strong>
+                                                        <strong className="timeline-program-name">
+                                                            {p.name}
+                                                        </strong>
+                                                        {isContinuation && (
+                                                            <span className="tag continuation-tag">
+                                                                En emisión · continúa
+                                                            </span>
+                                                        )}
                                                         <span className="muted timeline-program-meta">
                                                             {formatTime12h(p.startTime)} – {formatTime12h(endStr)}
                                                             {dayFilter === "all" && dayShorts ? ` · ${dayShorts}` : ""}
@@ -781,7 +807,7 @@ export default function Programs() {
                                                         )}
                                                     </div>
                                                     <div className="timeline-program-actions">
-                                                        {!p.active && (
+                                                        {!p.active && !isContinuation && (
                                                             <button
                                                                 type="button"
                                                                 className="secondary btn-sm"
@@ -792,10 +818,25 @@ export default function Programs() {
                                                         )}
                                                         <button
                                                             type="button"
-                                                            className="ghost btn-sm"
+                                                            className="ghost icon-btn"
                                                             onClick={() => openEditModal(p)}
+                                                            title={`Editar ${p.name}`}
+                                                            aria-label={`Editar ${p.name}`}
                                                         >
-                                                            Editar
+                                                            <svg
+                                                                width="16"
+                                                                height="16"
+                                                                viewBox="0 0 24 24"
+                                                                fill="none"
+                                                                stroke="currentColor"
+                                                                strokeWidth="2"
+                                                                strokeLinecap="round"
+                                                                strokeLinejoin="round"
+                                                                aria-hidden="true"
+                                                            >
+                                                                <path d="M12 20h9" />
+                                                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                                            </svg>
                                                         </button>
                                                     </div>
                                                 </div>

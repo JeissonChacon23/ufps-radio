@@ -651,6 +651,8 @@ audio { width: 100%; }
 
 /* Vertical schedule timeline for Programs */
 .schedule-timeline-card {
+    grid-column: 1 / -1;
+    width: 100%;
     padding: 0;
     overflow: hidden;
 }
@@ -658,11 +660,12 @@ audio { width: 100%; }
 .schedule-timeline {
     display: flex;
     flex-direction: column;
+    width: 100%;
 }
 
 .timeline-row {
     display: grid;
-    grid-template-columns: 108px 1fr;
+    grid-template-columns: 108px minmax(0, 1fr);
     align-items: stretch;
     border-bottom: 1px solid var(--border, #e5e7eb);
 }
@@ -693,6 +696,8 @@ audio { width: 100%; }
     flex-direction: column;
     justify-content: center;
     gap: 8px;
+    width: 100%;
+    min-width: 0;
 }
 
 .timeline-free-label {
@@ -705,11 +710,18 @@ audio { width: 100%; }
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    width: 100%;
     padding: 8px 12px;
     border-radius: 10px;
     background: #ffffff;
     border: 1px solid #e5e7eb;
     border-left: 4px solid var(--ufps-red, #d91023);
+}
+
+.timeline-program-line.is-continuation {
+    background: #fff8f8;
+    border-left-style: dashed;
+    border-left-color: rgba(217, 16, 35, 0.55);
 }
 
 .timeline-program-line.is-disabled {
@@ -718,11 +730,18 @@ audio { width: 100%; }
     opacity: 0.82;
 }
 
+.continuation-tag {
+    background: #fee2e2;
+    color: #991b1b;
+    font-size: 11px;
+}
+
 .timeline-program-info {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+    flex: 1;
     min-width: 0;
 }
 
@@ -740,6 +759,16 @@ audio { width: 100%; }
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
+}
+
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 8px;
 }
 
 .modal-card-wide {
