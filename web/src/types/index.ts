@@ -50,6 +50,9 @@ export interface Podcast {
     imageUrl: string | null; // Drive file ID, or null to use the program image
     status: PodcastStatus;
     errorMessage: string;
+    active: boolean; // false when soft-disabled (never hard-deleted)
+    disableReason: string;
+    disabledAt: Date | null;
 }
 
 export type PodcastInput = Pick<

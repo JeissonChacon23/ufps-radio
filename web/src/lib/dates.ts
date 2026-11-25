@@ -19,13 +19,14 @@ export function formatDate(d: Date): string {
     return d.toLocaleDateString("es-CO", { dateStyle: "long" });
 }
 
+/** Formats time in 24-hour military format ("HH:mm", e.g. "00:00" – "23:59"). */
 export function formatTime12h(time: string): string {
     if (!time || !/^\d{2}:\d{2}$/.test(time)) return "";
     const [h, m] = time.split(":").map(Number);
-    const period = h >= 12 ? "p. m." : "a. m.";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return `${h12}:${pad(m)} ${period}`;
+    return `${pad(h)}:${pad(m)}`;
 }
+
+export const formatTime24h = formatTime12h;
 
 export function timeToMinutes(time: string): number {
     const [h, m] = time.split(":").map(Number);

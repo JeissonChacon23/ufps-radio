@@ -55,6 +55,7 @@ const SCHEDULE_HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 export default function Programs() {
     const [programs, setPrograms] = useState<Program[]>([]);
+    const [showCreateModal, setShowCreateModal] = useState(false);
     const [form, setForm] = useState<ProgramForm>(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
@@ -83,15 +84,34 @@ export default function Programs() {
         listPrograms().then(setPrograms);
     }, []);
 
-    // Close edit modal on Escape
+    // Close create/edit modals on Escape
     useEffect(() => {
-        if (!editingProgram) return;
+        if (!editingProgram && !showCreateModal) return;
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape" && !editSaving) setEditingProgram(null);
+            if (e.key === "Escape") {
+                if (editingProgram && !editSaving) setEditingProgram(null);
+                if (showCreateModal && !saving) setShowCreateModal(false);
+            }
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [editingProgram, editSaving]);
+    }, [editingProgram, editSaving, showCreateModal, saving]);
+
+    const openCreateModal = (prefillHour?: number) => {
+        setError("");
+        setStatusMessage("");
+        const prefillDays = dayFilter !== "all" ? [dayFilter] : [];
+        const prefillTime =
+            typeof prefillHour === "number"
+                ? `${String(prefillHour).padStart(2, "0")}:00`
+                : "";
+        setForm({
+            ...EMPTY_FORM,
+            days: prefillDays,
+            startTime: prefillDays.length > 0 ? prefillTime : "",
+        });
+        setShowCreateModal(true);
+    };
 
     const filteredPrograms = useMemo(() => {
         const term = normalizeText(search.trim());
@@ -289,6 +309,7 @@ export default function Programs() {
                 artworkDriveId,
             });
             setForm(EMPTY_FORM);
+            setShowCreateModal(false);
             setPrograms(await listPrograms());
             setStatusMessage("Programa publicado correctamente.");
         } catch {
@@ -600,157 +621,45 @@ export default function Programs() {
 
     return (
         <>
-            <form className="card" onSubmit={handleCreateSubmit}>
-                <h2>Nuevo programa</h2>
-
-                <label>Nombre del programa
-                    <input value={form.name} onChange={(e) => setField("name", e.target.value)} required />
-                </label>
-
-                <DriveImageField
-                    label="Imagen del programa (artwork 1024x1024)"
-                    value={form.artworkLink}
-                    onChange={(value) => setField("artworkLink", value)}
-                />
-
-                <fieldset>
-                    <legend>Días de emisión</legend>
-                    <div className="row">
-                        {DAYS.map((d) => (
-                            <label key={d.value} className="check">
-                                <input
-                                    type="checkbox"
-                                    checked={form.days.includes(d.value)}
-                                    onChange={() => toggleDay(d.value)}
-                                />
-                                {d.label}
-                            </label>
-                        ))}
-                    </div>
-                </fieldset>
-
-                <div className="row">
-                    <label>Hora de inicio
-                        <TimeInput
-                            value={form.startTime}
-                            onChange={selectStartTime}
-                            isTimeDisabled={(hhmm) => computeConflict(form.days, hhmm, 1, null, true)}
-                            disabled={form.days.length === 0}
-                            required
-                        />
-                        {form.days.length === 0 && (
-                            <small className="muted">
-                                Selecciona primero los días de emisión para ver las horas disponibles.
-                            </small>
-                        )}
-                        {currentStartConflict && (
-                            <small className="error">Cruce de horario: {currentStartConflict}</small>
-                        )}
-                    </label>
-                    <label>
-                        Duración (minutos{form.startTime && durationLimit.maxDuration > 0 ? ` · máx. ${durationLimit.maxDuration}` : ""})
-                        <input
-                            type="number"
-                            inputMode="numeric"
-                            min={1}
-                            max={durationLimit.maxDuration > 0 ? durationLimit.maxDuration : 720}
-                            step={1}
-                            value={form.durationMinutes}
-                            onChange={(e) => {
-                                const raw = e.target.value;
-                                if (raw === "") {
-                                    setField("durationMinutes", "");
-                                    return;
-                                }
-                                const n = Math.round(Number(raw));
-                                if (!Number.isFinite(n)) return;
-                                const cap = durationLimit.maxDuration > 0 ? durationLimit.maxDuration : 720;
-                                setField("durationMinutes", String(Math.min(Math.max(n, 0), cap)));
-                            }}
-                            placeholder="Ej. 20, 60"
-                            required
-                        />
-                        {form.startTime && durationLimit.maxDuration > 0 && (
-                            <small className="muted">
-                                {durationLimit.nextProgram
-                                    ? `Límite: máx. ${durationLimit.maxDuration} min — hasta las ${formatTime12h(durationLimit.limitTime)} (inicio de «${durationLimit.nextProgram.name}»).`
-                                    : `Termina a las ${formatTime12h(addMinutes(form.startTime, Math.min(parsedDuration, durationLimit.maxDuration)))} (máx. ${durationLimit.maxDuration} min).`}
-                            </small>
-                        )}
-                    </label>
-                </div>
-
-                {form.days.length > 0 && (
-                    <div className="slot-picker-box">
-                        <div className="slot-picker-head">
-                            <strong>Disponibilidad de franjas horarias</strong>
-                            <small className="muted">
-                                Los programas deshabilitados liberan su horario. Al elegir una franja disponible, la duración máxima se limita automáticamente hasta el siguiente programa activo.
-                            </small>
-                        </div>
-                        <div className="slot-grid">
-                            {hourSlots.map((slot) => {
-                                const isSelected = form.startTime === slot.hhmm;
-                                const isBlocked = Boolean(slot.conflict);
-                                const shortStatus = slot.conflict?.startsWith("Hora pasada")
-                                    ? "Pasada"
-                                    : isBlocked
-                                      ? "Ocupada"
-                                      : slot.nextProgramName
-                                        ? `Hasta ${formatTime12h(slot.limitTime)}`
-                                        : "Disponible";
-                                return (
-                                    <button
-                                        key={slot.hhmm}
-                                        type="button"
-                                        disabled={isBlocked}
-                                        title={
-                                            slot.conflict ??
-                                            (slot.nextProgramName
-                                                ? `Disponible desde ${slot.label} hasta ${formatTime12h(slot.limitTime)} (máx. ${slot.maxDuration} min antes de «${slot.nextProgramName}»)`
-                                                : `Disponible desde ${slot.label}`)
-                                        }
-                                        className={`slot-btn ${isSelected ? "selected" : ""} ${isBlocked ? "occupied" : ""}`}
-                                        onClick={() => selectStartTime(slot.hhmm)}
-                                    >
-                                        <span>{slot.label}</span>
-                                        <small>{shortStatus}</small>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
-                <div className="row">
-                    <label>Colectivo
-                        <input value={form.collective} onChange={(e) => setField("collective", e.target.value)} />
-                    </label>
-
-                    <label>Locutores (separados por coma)
-                        <input value={form.hosts} onChange={(e) => setField("hosts", e.target.value)} />
-                    </label>
-                </div>
-
-                {error && <p className="error">{error}</p>}
-                {statusMessage && <p className="ok">{statusMessage}</p>}
-
-                <div className="row">
-                    <button type="submit" disabled={saving || Boolean(currentStartConflict)}>
-                        {saving ? "Guardando…" : "Publicar programa"}
-                    </button>
-                </div>
-            </form>
-
-            {/* Parrilla de programación: horas en vertical a la izquierda y programas al frente */}
+            {/* Encabezado de la parrilla + botón '+' para abrir el popup de nuevo programa */}
             <div className="section-head">
                 <div>
                     <h2>Parrilla de programación · {selectedDayLabel}</h2>
                 </div>
-                <span className="muted">
-                    {filteredPrograms.length} {filteredPrograms.length === 1 ? "programa" : "programas"}
-                </span>
+                <div className="row" style={{ alignItems: "center", gap: "10px" }}>
+                    <span className="muted">
+                        {filteredPrograms.length} {filteredPrograms.length === 1 ? "programa" : "programas"}
+                    </span>
+                    <button
+                        type="button"
+                        className="add-program-btn"
+                        onClick={() => openCreateModal()}
+                        title="Registrar nuevo programa"
+                    >
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                        >
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        Nuevo programa
+                    </button>
+                </div>
             </div>
+
+            {statusMessage && (
+                <div className="card" style={{ gridColumn: "1 / -1", padding: "12px 16px" }}>
+                    <p className="ok" style={{ margin: 0 }}>{statusMessage}</p>
+                </div>
+            )}
 
             <div className="chips">
                 <button
@@ -886,6 +795,177 @@ export default function Programs() {
                     </div>
                 )}
             </div>
+
+            {/* POPUP 0: REGISTRAR NUEVO PROGRAMA */}
+            {showCreateModal && (
+                <div
+                    className="modal-backdrop"
+                    onClick={() => !saving && setShowCreateModal(false)}
+                >
+                    <form
+                        className="card modal-card modal-card-wide"
+                        onClick={(e) => e.stopPropagation()}
+                        onSubmit={handleCreateSubmit}
+                    >
+                        <div className="section-head">
+                            <h2 style={{ margin: 0 }}>Nuevo programa</h2>
+                            <button
+                                type="button"
+                                className="ghost btn-sm"
+                                onClick={() => setShowCreateModal(false)}
+                                disabled={saving}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <label>Nombre del programa
+                            <input value={form.name} onChange={(e) => setField("name", e.target.value)} required />
+                        </label>
+
+                        <DriveImageField
+                            label="Imagen del programa (artwork 1024x1024)"
+                            value={form.artworkLink}
+                            onChange={(value) => setField("artworkLink", value)}
+                        />
+
+                        <fieldset>
+                            <legend>Días de emisión</legend>
+                            <div className="row">
+                                {DAYS.map((d) => (
+                                    <label key={d.value} className="check">
+                                        <input
+                                            type="checkbox"
+                                            checked={form.days.includes(d.value)}
+                                            onChange={() => toggleDay(d.value)}
+                                        />
+                                        {d.label}
+                                    </label>
+                                ))}
+                            </div>
+                        </fieldset>
+
+                        <div className="row">
+                            <label>Hora de inicio
+                                <TimeInput
+                                    value={form.startTime}
+                                    onChange={selectStartTime}
+                                    isTimeDisabled={(hhmm) => computeConflict(form.days, hhmm, 1, null, true)}
+                                    disabled={form.days.length === 0}
+                                    required
+                                />
+                                {form.days.length === 0 && (
+                                    <small className="muted">
+                                        Selecciona primero los días de emisión para ver las horas disponibles.
+                                    </small>
+                                )}
+                                {currentStartConflict && (
+                                    <small className="error">Cruce de horario: {currentStartConflict}</small>
+                                )}
+                            </label>
+                            <label>
+                                Duración (minutos{form.startTime && durationLimit.maxDuration > 0 ? ` · máx. ${durationLimit.maxDuration}` : ""})
+                                <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={1}
+                                    max={durationLimit.maxDuration > 0 ? durationLimit.maxDuration : 720}
+                                    step={1}
+                                    value={form.durationMinutes}
+                                    onChange={(e) => {
+                                        const raw = e.target.value;
+                                        if (raw === "") {
+                                            setField("durationMinutes", "");
+                                            return;
+                                        }
+                                        const n = Math.round(Number(raw));
+                                        if (!Number.isFinite(n)) return;
+                                        const cap = durationLimit.maxDuration > 0 ? durationLimit.maxDuration : 720;
+                                        setField("durationMinutes", String(Math.min(Math.max(n, 0), cap)));
+                                    }}
+                                    placeholder="Ej. 20, 60"
+                                    required
+                                />
+                                {form.startTime && durationLimit.maxDuration > 0 && (
+                                    <small className="muted">
+                                        {durationLimit.nextProgram
+                                            ? `Límite: máx. ${durationLimit.maxDuration} min — hasta las ${formatTime12h(durationLimit.limitTime)} (inicio de «${durationLimit.nextProgram.name}»).`
+                                            : `Termina a las ${formatTime12h(addMinutes(form.startTime, Math.min(parsedDuration, durationLimit.maxDuration)))} (máx. ${durationLimit.maxDuration} min).`}
+                                    </small>
+                                )}
+                            </label>
+                        </div>
+
+                        {form.days.length > 0 && (
+                            <div className="slot-picker-box">
+                                <div className="slot-picker-head">
+                                    <strong>Disponibilidad de franjas horarias</strong>
+                                    <small className="muted">
+                                        Los programas deshabilitados liberan su horario. Al elegir una franja disponible, la duración máxima se limita automáticamente hasta el siguiente programa activo.
+                                    </small>
+                                </div>
+                                <div className="slot-grid">
+                                    {hourSlots.map((slot) => {
+                                        const isSelected = form.startTime === slot.hhmm;
+                                        const isBlocked = Boolean(slot.conflict);
+                                        const shortStatus = slot.conflict?.startsWith("Hora pasada")
+                                            ? "Pasada"
+                                            : isBlocked
+                                              ? "Ocupada"
+                                              : slot.nextProgramName
+                                                ? `Hasta ${formatTime12h(slot.limitTime)}`
+                                                : "Disponible";
+                                        return (
+                                            <button
+                                                key={slot.hhmm}
+                                                type="button"
+                                                disabled={isBlocked}
+                                                title={
+                                                    slot.conflict ??
+                                                    (slot.nextProgramName
+                                                        ? `Disponible desde ${slot.label} hasta ${formatTime12h(slot.limitTime)} (máx. ${slot.maxDuration} min antes de «${slot.nextProgramName}»)`
+                                                        : `Disponible desde ${slot.label}`)
+                                                }
+                                                className={`slot-btn ${isSelected ? "selected" : ""} ${isBlocked ? "occupied" : ""}`}
+                                                onClick={() => selectStartTime(slot.hhmm)}
+                                            >
+                                                <span>{slot.label}</span>
+                                                <small>{shortStatus}</small>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="row">
+                            <label>Colectivo
+                                <input value={form.collective} onChange={(e) => setField("collective", e.target.value)} />
+                            </label>
+
+                            <label>Locutores (separados por coma)
+                                <input value={form.hosts} onChange={(e) => setField("hosts", e.target.value)} />
+                            </label>
+                        </div>
+
+                        {error && <p className="error">{error}</p>}
+
+                        <div className="row" style={{ justifyContent: "flex-end", marginTop: "6px" }}>
+                            <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => setShowCreateModal(false)}
+                                disabled={saving}
+                            >
+                                Cancelar
+                            </button>
+                            <button type="submit" disabled={saving || Boolean(currentStartConflict)}>
+                                {saving ? "Guardando…" : "Publicar programa"}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
 
             {/* POPUP 1: EDITAR PROGRAMA */}
             {editingProgram && (
