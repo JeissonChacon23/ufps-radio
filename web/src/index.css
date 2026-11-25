@@ -678,16 +678,23 @@ audio { width: 100%; }
     background: #fcfcfd;
 }
 
-.timeline-hour {
+.timeline-hour-rail {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: #f9fafb;
+    border-right: 1px solid var(--border, #e5e7eb);
+}
+
+.timeline-hour-slot {
     padding: 12px 14px;
     font-size: 13px;
     font-weight: 700;
     color: #374151;
-    background: #f9fafb;
-    border-right: 1px solid var(--border, #e5e7eb);
     display: flex;
     align-items: center;
     white-space: nowrap;
+    min-height: 52px;
 }
 
 .timeline-programs {
@@ -711,29 +718,22 @@ audio { width: 100%; }
     justify-content: space-between;
     gap: 12px;
     width: 100%;
-    padding: 8px 12px;
+    padding: 10px 14px;
     border-radius: 10px;
     background: #ffffff;
     border: 1px solid #e5e7eb;
     border-left: 4px solid var(--ufps-red, #d91023);
 }
 
-.timeline-program-line.is-continuation {
-    background: #fff8f8;
-    border-left-style: dashed;
-    border-left-color: rgba(217, 16, 35, 0.55);
+.timeline-program-line.is-full-span {
+    flex: 1;
+    height: 100%;
 }
 
 .timeline-program-line.is-disabled {
     background: #f9fafb;
     border-left-color: #9ca3af;
     opacity: 0.82;
-}
-
-.continuation-tag {
-    background: #fee2e2;
-    color: #991b1b;
-    font-size: 11px;
 }
 
 .timeline-program-info {

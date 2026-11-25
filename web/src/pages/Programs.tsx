@@ -513,56 +513,84 @@ export default function Programs() {
     };
 
     /**
-     * Groups filtered programs across ALL hours they occupy (e.g. a 2:00–4:00 PM program
-     * appears at 2:00 PM as start and at 3:00 PM as continuation so the hour never looks empty).
+     * Builds unified schedule blocks across the 24-hour day.
+     * - When viewing a specific day (or when a multi-hour program spans consecutive hours),
+     *   a 2-hour program (e.g., 2:00 PM – 4:00 PM) renders as ONE single continuous block
+     *   spanning both hours (2:00 PM and 3:00 PM stacked in the left rail) with NO divider
+     *   cutting through the middle. Dividers only appear between distinct blocks/programs.
      */
-    const timelineRows = useMemo(() => {
-        interface TimelineEntry {
-            program: Program;
-            isContinuation: boolean;
-        }
-        const byHour = new Map<number, TimelineEntry[]>();
-
-        for (const p of filteredPrograms) {
-            const startMin = timeToMinutes(p.startTime);
-            if (startMin < 0) continue;
-            const endMin = startMin + Math.max(p.durationMinutes, 1);
-            const firstHour = Math.floor(startMin / 60);
-            const lastHour = Math.min(23, Math.floor((endMin - 1) / 60));
-
-            for (let h = firstHour; h <= lastHour; h++) {
-                const hourKey = h % 24;
-                const list = byHour.get(hourKey) ?? [];
-                list.push({ program: p, isContinuation: h > firstHour });
-                byHour.set(hourKey, list);
-            }
+    const scheduleBlocks = useMemo(() => {
+        interface Block {
+            id: string;
+            startHour: number;
+            endHour: number; // inclusive
+            programs: Program[];
         }
 
-        for (const list of byHour.values()) {
-            list.sort((a, b) => {
+        // First compute the occupied hour ranges for every filtered program
+        const items = filteredPrograms
+            .map((p) => {
+                const startMin = timeToMinutes(p.startTime);
+                if (startMin < 0) return null;
+                const endMin = startMin + Math.max(p.durationMinutes, 1);
+                const firstHour = Math.floor(startMin / 60);
+                const lastHour = Math.min(23, Math.floor((endMin - 1) / 60));
+                return { program: p, firstHour, lastHour };
+            })
+            .filter((x): x is { program: Program; firstHour: number; lastHour: number } => x !== null)
+            .sort((a, b) => {
+                if (a.firstHour !== b.firstHour) return a.firstHour - b.firstHour;
                 if (a.program.active !== b.program.active) return a.program.active ? -1 : 1;
-                if (a.isContinuation !== b.isContinuation) return a.isContinuation ? 1 : -1;
                 return (
                     a.program.startTime.localeCompare(b.program.startTime) ||
                     a.program.name.localeCompare(b.program.name)
                 );
             });
+
+        // Merge overlapping/co-occurring program hour ranges into unified blocks
+        const occupiedBlocks: Block[] = [];
+        for (const item of items) {
+            const existing = occupiedBlocks.find(
+                (b) => item.firstHour <= b.endHour && item.lastHour >= b.startHour,
+            );
+            if (existing) {
+                existing.startHour = Math.min(existing.startHour, item.firstHour);
+                existing.endHour = Math.max(existing.endHour, item.lastHour);
+                existing.programs.push(item.program);
+            } else {
+                occupiedBlocks.push({
+                    id: `block-${item.firstHour}-${item.program.id}`,
+                    startHour: item.firstHour,
+                    endHour: item.lastHour,
+                    programs: [item.program],
+                });
+            }
         }
 
-        const hoursToShow =
-            search.trim() !== ""
-                ? SCHEDULE_HOURS.filter((h) => (byHour.get(h)?.length ?? 0) > 0)
-                : SCHEDULE_HOURS;
+        // If user is searching, show only matching occupied blocks
+        if (search.trim() !== "") {
+            return occupiedBlocks.sort((a, b) => a.startHour - b.startHour);
+        }
 
-        return hoursToShow.map((h) => {
-            const hhmm = `${String(h).padStart(2, "0")}:00`;
-            return {
-                hour: h,
-                hhmm,
-                label: formatTime12h(hhmm),
-                entries: byHour.get(h) ?? [],
-            };
-        });
+        // Otherwise build the full 24-hour vertical schedule, inserting empty hour rows where free
+        const result: Block[] = [];
+        let h = 0;
+        while (h < 24) {
+            const block = occupiedBlocks.find((b) => b.startHour === h);
+            if (block) {
+                result.push(block);
+                h = block.endHour + 1;
+            } else {
+                result.push({
+                    id: `empty-${h}`,
+                    startHour: h,
+                    endHour: h,
+                    programs: [],
+                });
+                h += 1;
+            }
+        }
+        return result;
     }, [filteredPrograms, search]);
 
     const selectedDayLabel =
@@ -760,92 +788,101 @@ export default function Programs() {
             </div>
 
             <div className="card schedule-timeline-card">
-                {timelineRows.length === 0 ? (
+                {scheduleBlocks.length === 0 ? (
                     <p className="empty">No hay programas para este filtro.</p>
                 ) : (
                     <div className="schedule-timeline">
-                        {timelineRows.map((row) => (
-                            <div
-                                key={row.hour}
-                                className={`timeline-row ${row.entries.length === 0 ? "timeline-row-empty" : ""}`}
-                            >
-                                <div className="timeline-hour">{row.label}</div>
-                                <div className="timeline-programs">
-                                    {row.entries.length === 0 ? (
-                                        <span className="timeline-free-label">Disponible</span>
-                                    ) : (
-                                        row.entries.map(({ program: p, isContinuation }) => {
-                                            const endStr = addMinutes(p.startTime, p.durationMinutes);
-                                            const dayShorts = DAYS.filter((d) => p.days.includes(d.value))
-                                                .map((d) => d.short)
-                                                .join(" · ");
-                                            return (
-                                                <div
-                                                    key={`${p.id}-${row.hour}`}
-                                                    className={`timeline-program-line ${p.active ? "" : "is-disabled"} ${isContinuation ? "is-continuation" : ""}`}
-                                                >
-                                                    <div className="timeline-program-info">
-                                                        <strong className="timeline-program-name">
-                                                            {p.name}
-                                                        </strong>
-                                                        {isContinuation && (
-                                                            <span className="tag continuation-tag">
-                                                                En emisión · continúa
+                        {scheduleBlocks.map((block) => {
+                            const spanHours = Array.from(
+                                { length: block.endHour - block.startHour + 1 },
+                                (_, i) => block.startHour + i,
+                            );
+                            const isEmpty = block.programs.length === 0;
+                            const isMultiHour = spanHours.length > 1;
+                            return (
+                                <div
+                                    key={block.id}
+                                    className={`timeline-row ${isEmpty ? "timeline-row-empty" : ""}`}
+                                >
+                                    <div className={`timeline-hour-rail ${isMultiHour ? "is-multi" : ""}`}>
+                                        {spanHours.map((h) => (
+                                            <div key={h} className="timeline-hour-slot">
+                                                {formatTime12h(`${String(h).padStart(2, "0")}:00`)}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="timeline-programs">
+                                        {isEmpty ? (
+                                            <span className="timeline-free-label">Disponible</span>
+                                        ) : (
+                                            block.programs.map((p) => {
+                                                const endStr = addMinutes(p.startTime, p.durationMinutes);
+                                                const dayShorts = DAYS.filter((d) => p.days.includes(d.value))
+                                                    .map((d) => d.short)
+                                                    .join(" · ");
+                                                return (
+                                                    <div
+                                                        key={p.id}
+                                                        className={`timeline-program-line ${p.active ? "" : "is-disabled"} ${isMultiHour && block.programs.length === 1 ? "is-full-span" : ""}`}
+                                                    >
+                                                        <div className="timeline-program-info">
+                                                            <strong className="timeline-program-name">
+                                                                {p.name}
+                                                            </strong>
+                                                            <span className="muted timeline-program-meta">
+                                                                {formatTime12h(p.startTime)} – {formatTime12h(endStr)}
+                                                                {dayFilter === "all" && dayShorts ? ` · ${dayShorts}` : ""}
                                                             </span>
-                                                        )}
-                                                        <span className="muted timeline-program-meta">
-                                                            {formatTime12h(p.startTime)} – {formatTime12h(endStr)}
-                                                            {dayFilter === "all" && dayShorts ? ` · ${dayShorts}` : ""}
-                                                        </span>
-                                                        {!p.active && (
-                                                            <span
-                                                                className="tag off"
-                                                                title={p.disableReason || "Programa deshabilitado"}
-                                                            >
-                                                                Deshabilitado
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="timeline-program-actions">
-                                                        {!p.active && !isContinuation && (
+                                                            {!p.active && (
+                                                                <span
+                                                                    className="tag off"
+                                                                    title={p.disableReason || "Programa deshabilitado"}
+                                                                >
+                                                                    Deshabilitado
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="timeline-program-actions">
+                                                            {!p.active && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="secondary btn-sm"
+                                                                    onClick={() => handleRequestEnable(p)}
+                                                                >
+                                                                    Habilitar
+                                                                </button>
+                                                            )}
                                                             <button
                                                                 type="button"
-                                                                className="secondary btn-sm"
-                                                                onClick={() => handleRequestEnable(p)}
+                                                                className="ghost icon-btn"
+                                                                onClick={() => openEditModal(p)}
+                                                                title={`Editar ${p.name}`}
+                                                                aria-label={`Editar ${p.name}`}
                                                             >
-                                                                Habilitar
+                                                                <svg
+                                                                    width="16"
+                                                                    height="16"
+                                                                    viewBox="0 0 24 24"
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    strokeWidth="2"
+                                                                    strokeLinecap="round"
+                                                                    strokeLinejoin="round"
+                                                                    aria-hidden="true"
+                                                                >
+                                                                    <path d="M12 20h9" />
+                                                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                                                </svg>
                                                             </button>
-                                                        )}
-                                                        <button
-                                                            type="button"
-                                                            className="ghost icon-btn"
-                                                            onClick={() => openEditModal(p)}
-                                                            title={`Editar ${p.name}`}
-                                                            aria-label={`Editar ${p.name}`}
-                                                        >
-                                                            <svg
-                                                                width="16"
-                                                                height="16"
-                                                                viewBox="0 0 24 24"
-                                                                fill="none"
-                                                                stroke="currentColor"
-                                                                strokeWidth="2"
-                                                                strokeLinecap="round"
-                                                                strokeLinejoin="round"
-                                                                aria-hidden="true"
-                                                            >
-                                                                <path d="M12 20h9" />
-                                                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                                                            </svg>
-                                                        </button>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            );
-                                        })
-                                    )}
+                                                );
+                                            })
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
